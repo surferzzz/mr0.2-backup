@@ -31,6 +31,16 @@ namespace CPRSimulation
         [Tooltip("检测的手部层级")]
         public LayerMask handLayerMask = -1;
 
+        [Header("距离备用（无碰撞时用手掌距离驱动）")]
+        [Tooltip("碰撞无触发时，用手部追踪手掌与胸部距离驱动深度/UI/触觉")]
+        public bool useDistanceFallback = true;
+        [Tooltip("手掌与胸部距离小于此值视为「在按压」米")]
+        public float palmDistanceThreshold = 0.5f;
+
+        [Header("调试")]
+        [Tooltip("在控制台打印所有进入触发器的物体名与是否识别为手")]
+        public bool debugLogTriggers = false;
+
         [Header("检测参数")]
         [Tooltip("开始检测的最小深度(cm)")]
         public float minDetectionDepthCm = 1f;
@@ -38,6 +48,11 @@ namespace CPRSimulation
         [Tooltip("位置平滑系数")]
         [Range(0.01f, 0.3f)]
         public float smoothing = 0.1f;
+
+        [Tooltip("手掌在「未按压」时距胸部表面的高度(m)。患者躺平时手从正上方向下按，" +
+                 "此值约为手悬停在胸口上方的距离。\n" +
+                 "= 此高度时深度=0；完全压到胸面时深度= compressionApproachHeight*100 cm")]
+        public float compressionApproachHeight = 0.12f;
 
         [Header("医学标准")]
         [Tooltip("最小标准深度(cm)")]
@@ -97,8 +112,11 @@ namespace CPRSimulation
         private float _lastCompressionTime = -1f;
         private float _peakDepthThisPress;
         private bool _isInitialized;
+        public bool IsInitialized => _isInitialized;
         private Transform _currentContactHand;
         private BoxCollider _triggerCollider;
+        private HandTrackingAdapter _distanceFallbackAdapter;
+        private bool _usingDistanceFallback;
 
         private void Start()
         {
@@ -113,7 +131,10 @@ namespace CPRSimulation
                 chestSurface = transform;
             }
 
-            _restHeight = chestSurface.position.y;
+            // 关键：基准高度 = 胸部表面 Y + 手悬停高度
+            // 患者躺平时手从上方向下按压，手降到胸面以下时才算"深度"
+            // 加上 compressionApproachHeight 后：手距胸面 12cm 时深度=0，压到胸面时深度=12cm
+            _restHeight = chestSurface.position.y + compressionApproachHeight;
             _smoothedPalmPos = Vector3.zero;
             _isPressing = false;
             _currentDepthCm = 0f;
@@ -129,7 +150,10 @@ namespace CPRSimulation
                 SetupCollisionDetection();
             }
 
-            Debug.Log($"[CPRPressDetector] 初始化完成，胸部基准高度: {_restHeight:F3}m, 碰撞检测: {useCollisionDetection}");
+            if (useDistanceFallback)
+                _distanceFallbackAdapter = FindObjectOfType<HandTrackingAdapter>();
+
+            Debug.Log($"[CPRPressDetector] 初始化完成 | 胸面Y={chestSurface.position.y:F3}m + 悬停偏移{compressionApproachHeight}m = 基准{_restHeight:F3}m | 碰撞:{useCollisionDetection} 距离备用:{useDistanceFallback}(adapter={(_distanceFallbackAdapter != null)})");
         }
 
         private void SetupCollisionDetection()
@@ -167,17 +191,31 @@ namespace CPRSimulation
         {
             if (!_isInitialized) return;
 
+            // 每帧动态更新基准高度，防止患者动画/位移导致基准钙假
+            if (chestSurface != null)
+                _restHeight = chestSurface.position.y + compressionApproachHeight;
+
             if (useCollisionDetection)
             {
-                // 碰撞检测模式：在OnTriggerStay中处理
                 if (_currentContactHand != null)
                 {
+                    _usingDistanceFallback = false;
                     UpdateDepthFromCollision(_currentContactHand.position);
                 }
-                else if (_isPressing)
+                else
                 {
-                    // 手离开了，结束按压
-                    EndCompression();
+                    bool usedFallback = TryDistanceFallback();
+                    if (!usedFallback)
+                    {
+                        if (_usingDistanceFallback)
+                        {
+                            _usingDistanceFallback = false;
+                            _handInContact = false;
+                            ProcessDepthChange(0f); // 会触发 EndCompression
+                        }
+                        else if (_isPressing)
+                            EndCompression();
+                    }
                 }
             }
             else if (handPalm != null)
@@ -187,11 +225,33 @@ namespace CPRSimulation
             }
         }
 
+        /// <summary> 距离备用：用手掌与胸部距离驱动深度，不依赖触发器 </summary>
+        private bool TryDistanceFallback()
+        {
+            if (!useDistanceFallback) return false;
+            if (_distanceFallbackAdapter == null)
+                _distanceFallbackAdapter = FindObjectOfType<HandTrackingAdapter>();
+            if (_distanceFallbackAdapter == null) return false;
+            Vector3 palm = _distanceFallbackAdapter.ActiveHandPosition;
+            if (palm.sqrMagnitude < 0.0001f) return false;
+            Transform refT = chestSurface != null ? chestSurface : transform;
+            float dist = Vector3.Distance(palm, refT.position);
+            if (dist <= palmDistanceThreshold)
+            {
+                _handInContact = true;
+                _usingDistanceFallback = true;
+                UpdateDepthFromCollision(palm);
+                return true;
+            }
+            return false;
+        }
+
         // 碰撞检测回调
         private void OnTriggerEnter(Collider other)
         {
             if (!useCollisionDetection || !_isInitialized) return;
-            
+            if (debugLogTriggers)
+                Debug.Log($"[CPRPressDetector] TriggerEnter: {other.name} layer={LayerMask.LayerToName(other.gameObject.layer)} isHand={IsHandCollider(other)}");
             if (IsHandCollider(other))
             {
                 _handInContact = true;
@@ -225,15 +285,31 @@ namespace CPRSimulation
 
         private bool IsHandCollider(Collider col)
         {
-            // 检查是否是手部碰撞体
+            // 检查层级（若设置了手部专用 Layer）
             if (handLayerMask != -1 && ((1 << col.gameObject.layer) & handLayerMask) == 0)
                 return false;
 
-            // 通过名称或tag判断
+            // Meta/OVR：碰撞体在 LeftHandAnchor / RightHandAnchor 下即视为手
+            Transform t = col.transform;
+            while (t != null)
+            {
+                string p = t.name;
+                if (p.Contains("LeftHandAnchor") || p.Contains("RightHandAnchor") ||
+                    p.Contains("HandAnchor") || p.Contains("HandTracking"))
+                    return true;
+                t = t.parent;
+            }
+
+            // 通过名称或 tag 判断
             string name = col.name.ToLower();
-            return name.Contains("hand") || name.Contains("palm") || 
-                   name.Contains("finger") || name.Contains("poke") ||
-                   col.CompareTag("Hand") || col.CompareTag("Player");
+            if (name.Contains("hand") || name.Contains("palm") || name.Contains("hands") ||
+                name.Contains("finger") || name.Contains("poke") || name.Contains("wrist") ||
+                name.Contains("bone") || name.Contains("customhand"))
+                return true;
+            if (col.CompareTag("Hand") || col.CompareTag("Player"))
+                return true;
+
+            return false;
         }
 
         private void UpdateDepthFromCollision(Vector3 handPosition)

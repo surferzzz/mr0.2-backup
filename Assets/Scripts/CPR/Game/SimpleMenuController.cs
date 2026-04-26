@@ -48,6 +48,32 @@ namespace CPRSimulation.Game
                 quitButton.onClick.AddListener(OnQuitClicked);
                 if (showDebugLog) Debug.Log("[Menu] 退出按钮已绑定");
             }
+
+            // 确保语言管理器存在
+            if (LanguageManager.Instance == null)
+            {
+                var go = new GameObject("LanguageManager");
+                go.AddComponent<LanguageManager>();
+            }
+
+            // 刷新按钮文字
+            RefreshButtonTexts();
+            if (LanguageManager.Instance != null)
+                LanguageManager.Instance.OnLanguageChanged += RefreshButtonTexts;
+        }
+
+        private void OnDestroy()
+        {
+            if (LanguageManager.Instance != null)
+                LanguageManager.Instance.OnLanguageChanged -= RefreshButtonTexts;
+        }
+
+        private void RefreshButtonTexts()
+        {
+            var startText = startButton != null ? startButton.GetComponentInChildren<Text>(true) : null;
+            var quitText  = quitButton  != null ? quitButton.GetComponentInChildren<Text>(true)  : null;
+            if (startText != null) startText.text = CPRTextLibrary.BtnStartTraining;
+            if (quitText  != null) quitText.text  = CPRTextLibrary.BtnQuit;
         }
 
         public void OnStartClicked()

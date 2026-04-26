@@ -46,7 +46,7 @@ namespace CPRSimulation.Core
             {
                 try
                 {
-                    BhapticsLibrary.Initialize();
+                    BhapticsLibrary.Initialize("", "", "");
                     if (showDebugLog)
                         Debug.Log("[Haptic] bHaptics SDK 已初始化");
                 }
@@ -199,13 +199,13 @@ namespace CPRSimulation.Core
                 }
 
                 // 双手震动
-                BhapticsLibrary.PlayGlove(
-                    GloveType.Left,
+                BhapticsLibrary.PlayMotors(
+                    (int)PositionType.GloveL,
                     motorIntensities,
                     durationMs);
 
-                BhapticsLibrary.PlayGlove(
-                    GloveType.Right,
+                BhapticsLibrary.PlayMotors(
+                    (int)PositionType.GloveR,
                     motorIntensities,
                     durationMs);
             }
@@ -269,8 +269,8 @@ namespace CPRSimulation.Core
                 // 节拍使用手指尖震动
                 int[] fingerTipPattern = new int[] { rhythmIntensity, 0, 0, 0, 0, 0 };
                 
-                BhapticsLibrary.PlayGlove(GloveType.Left, fingerTipPattern, 50);
-                BhapticsLibrary.PlayGlove(GloveType.Right, fingerTipPattern, 50);
+                BhapticsLibrary.PlayMotors((int)PositionType.GloveL, fingerTipPattern, 50);
+                BhapticsLibrary.PlayMotors((int)PositionType.GloveR, fingerTipPattern, 50);
             }
             catch { }
 #else

@@ -1,0 +1,271 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║                  🎯 从零开始制作 CPR 训练系统                        ║
+║                      一步一步，确保每步都有效果                      ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+第0步：完全清理
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Unity 顶部菜单：
+CPR训练系统 → 🧹 完全清理并重置
+
+这会删除所有之前创建的对象，让我们从干净的场景开始。
+
+✅ 清理完成后，场景中只剩下：
+   • 您的原始场景（outpost with snow）
+   • Remy 模型
+   • 摄像机、灯光等
+
+完美！现在我们从零开始。
+
+
+█████████████████████████████████████████████████████████████████████
+█                                                                   █
+█   第1步：创建最简单的碰撞检测Demo                                 █
+█           目标：看到碰撞检测工作                                  █
+█                                                                   █
+█████████████████████████████████████████████████████████████████████
+
+【1.1 创建一个简单的方块】
+
+1. Hierarchy 右键 → 3D Object → Cube
+2. 命名为 "TestTarget"（测试目标）
+3. 在 Scene 视图中调整位置：
+   • Position: (0, 1, 0)
+   • 放在 Remy 附近，容易看到的地方
+
+【1.2 添加物理组件】
+
+选中 TestTarget，在 Inspector 中：
+
+1. 确认有 Box Collider（默认有）
+2. Add Component → Rigidbody
+3. Rigidbody 设置：
+   ☑ Use Gravity = false（取消重力）
+   ☑ Is Kinematic = true（勾选）
+
+【1.3 添加检测脚本】
+
+选中 TestTarget，在 Inspector 中：
+
+1. Add Component → 搜索 "SimpleDemo_Step1"
+2. 添加这个脚本
+3. 在脚本参数中：
+   • Hit Color = Red（红色）
+   • Normal Color = Green（绿色）
+
+【1.4 创建测试球】
+
+1. Hierarchy 右键 → 3D Object → Sphere
+2. 命名为 "TestBall"
+3. 在 Inspector 中：
+   • Position: 比 TestTarget 高一点
+   • 例如: (0, 2, 0)
+4. 确认有 Sphere Collider
+5. Add Component → Rigidbody
+6. Rigidbody 设置：
+   ☑ Use Gravity = true（勾选重力）
+   • Mass = 1
+
+【1.5 测试！】
+
+1. 点击 Unity 播放按钮 ▶️
+2. 观察：
+   ✅ TestBall 掉落
+   ✅ 碰到 TestTarget
+   ✅ TestTarget 变成红色
+   ✅ Console 显示：🎯 碰撞检测！第 1 次
+
+如果看到这些 → 成功！✨
+
+如果没有 → 停下来，我们一起找问题
+
+
+█████████████████████████████████████████████████████████████████████
+█                                                                   █
+█   第2步：在 Remy 身上添加检测区                                   █
+█           目标：让 Remy 的某个部位可以被碰撞检测                  █
+█                                                                   █
+█████████████████████████████████████████████████████████████████████
+
+【2.1 在 Remy 上创建检测区】
+
+1. Hierarchy → 选中 Remy@Laying Seizure
+2. 右键 → Create Empty
+3. 命名为 "ChestTarget"
+4. 调整位置到 Remy 的胸部：
+   • 在 Scene 视图中用移动工具(W键)拖动
+   • 或手动设置 Position
+
+【2.2 给检测区添加形状】
+
+选中 ChestTarget，在 Inspector 中：
+
+1. Add Component → Box Collider
+2. Box Collider 设置：
+   • Size: (0.3, 0.1, 0.2)
+3. Add Component → Rigidbody
+4. Rigidbody 设置：
+   ☑ Is Kinematic = true
+   ☐ Use Gravity = false
+
+【2.3 添加视觉标识】
+
+选中 ChestTarget：
+
+1. Add Component → Mesh Filter
+2. Mesh = Cube
+3. Add Component → Mesh Renderer
+4. 在 Materials 中创建一个绿色半透明材质
+
+【2.4 添加检测脚本】
+
+选中 ChestTarget：
+
+1. Add Component → SimpleDemo_Step1
+2. 设置颜色：
+   • Normal Color = Green
+   • Hit Color = Red
+
+【2.5 测试！】
+
+1. 调整 TestBall 位置到 ChestTarget 上方
+2. 点击播放 ▶️
+3. 观察：
+   ✅ 球掉到 ChestTarget 上
+   ✅ ChestTarget 变红
+   ✅ Console 显示碰撞
+
+成功！现在 Remy 的胸部有检测了！
+
+
+█████████████████████████████████████████████████████████████████████
+█                                                                   █
+█   第3步：添加简单的UI显示                                         █
+█           目标：在屏幕上显示碰撞次数                              █
+█                                                                   █
+█████████████████████████████████████████████████████████████████████
+
+【3.1 创建UI Canvas】
+
+1. Hierarchy 右键 → UI → Canvas
+2. Canvas 自动创建，命名保持 "Canvas"
+3. Canvas 设置：
+   • Render Mode = Screen Space - Overlay
+
+【3.2 创建文本显示】
+
+1. 选中 Canvas
+2. 右键 → UI → Text
+3. 命名为 "HitCountText"
+4. 设置：
+   • Rect Transform → Anchor: Top Left
+   • Position: (100, -50, 0)
+   • Width: 300, Height: 50
+   • Text: "碰撞次数: 0"
+   • Font Size: 30
+   • Color: White
+
+【3.3 创建显示脚本】
+
+稍后我会创建一个简单的UI更新脚本。
+
+
+█████████████████████████████████████████████████████████████████████
+█                                                                   █
+█   第4步：配置VR手部（Quest 3）                                    █
+█           目标：用真实的手代替测试球                              █
+█                                                                   █
+█████████████████████████████████████████████████████████████████████
+
+【4.1 找到VR手部对象】
+
+在您的场景中，找到 XR Rig 或类似的对象：
+• PlayerController
+  ├─ XROrigin
+  │  ├─ Camera
+  │  ├─ LeftHand
+  │  └─ RightHand
+
+【4.2 给手部添加碰撞器】
+
+选中 LeftHand：
+1. Add Component → Sphere Collider
+2. Radius = 0.05
+3. Add Component → Rigidbody
+4. 设置：
+   ☐ Use Gravity = false
+   ☑ Is Kinematic = true
+
+对 RightHand 做同样操作
+
+【4.3 测试】
+
+1. Build And Run 到 Quest 3
+2. 在 VR 中用手触碰 ChestTarget
+3. 应该能看到变色和检测
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 关键点总结
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+每个可碰撞对象需要：
+✅ Collider（碰撞器）
+✅ Rigidbody（刚体）
+✅ 检测脚本（SimpleDemo_Step1）
+
+碰撞的两个对象至少有一个需要：
+✅ Rigidbody 不是 Kinematic
+或
+✅ 一个移动、另一个静止
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❓ 故障排查
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: 球穿过去了，没有碰撞？
+A: 检查：
+   1. 两个对象都有 Collider？
+   2. 至少一个有 Rigidbody？
+   3. Is Trigger 是否取消勾选？
+
+Q: Console 没有显示碰撞信息？
+A: 检查：
+   1. SimpleDemo_Step1 脚本是否添加？
+   2. Console 是否被过滤了？（清除过滤）
+
+Q: 看不到颜色变化？
+A: 检查：
+   1. 对象有 Renderer 吗？
+   2. Normal Color 和 Hit Color 是否不同？
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 现在开始
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+第一步：
+Unity 顶部菜单 → CPR训练系统 → 🧹 完全清理并重置
+
+然后：
+按照上面的步骤，一步一步来
+
+每完成一步，都测试一下，确保有效果再继续！
+
+我会在旁边帮助您！
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+让我们慢慢来，确保每一步都成功！
+
+准备好了吗？开始第0步：清理！
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+

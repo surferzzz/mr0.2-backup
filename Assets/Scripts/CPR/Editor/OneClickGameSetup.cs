@@ -74,7 +74,7 @@ namespace CPRSimulation.Editor
             var mainMenuPanel = CreatePanel("MainMenuPanel", canvasObj.transform, new Color(0, 0, 0, 0.5f));
 
             // 标题
-            CreateText("Title", mainMenuPanel.transform, "CPR 心肺复苏训练", 72, 
+            CreateText("Title", mainMenuPanel.transform, "CPR 心肺蘇生トレーニング", 72, 
                 new Vector2(0, 200), new Vector2(800, 100), Color.white, FontStyle.Bold);
 
             // 副标题
@@ -95,28 +95,28 @@ namespace CPRSimulation.Editor
             var tutorialPanel = CreatePanel("TutorialPanel", canvasObj.transform, new Color(0, 0, 0, 0.85f));
             tutorialPanel.SetActive(false);
 
-            CreateText("TutorialTitle", tutorialPanel.transform, "CPR 训练教程", 48, 
+            CreateText("TutorialTitle", tutorialPanel.transform, "CPR トレーニングガイド", 48, 
                 new Vector2(0, 250), new Vector2(600, 80), Color.white, FontStyle.Bold);
 
             string tutorialContent = 
-                "心肺复苏 (CPR) 标准步骤：\n\n" +
-                "1. 确认现场安全\n" +
-                "2. 检查患者意识 - 轻拍肩膀、大声呼喊\n" +
-                "3. 呼叫急救 - 拨打120\n" +
-                "4. 胸外按压\n" +
-                "   • 按压位置：胸骨下半部\n" +
-                "   • 按压深度：5-6 厘米\n" +
-                "   • 按压频率：100-120 次/分钟\n" +
-                "5. 每30次按压后进行2次人工呼吸\n\n" +
-                "训练中手套会通过震动反馈按压质量";
+                "心肺蘇生 (CPR) 標準手順：\n\n" +
+                "1. 現場の安全確認\n" +
+                "2. 患者の意識確認 - 肩を軽く叩く、大声で呼ぶ\n" +
+                "3. 救急通報 - 119番\n" +
+                "4. 胸骨圧迫\n" +
+                "   • 圧迫位置：胸骨下半部\n" +
+                "   • 圧迫深さ：5-6 cm\n" +
+                "   • 圧迫テンポ：100-120 回/分\n" +
+                "5. 30回圧迫後に2回人工呼吸\n\n" +
+                "トレーニング中、グローブが振動で圧迫品質をフィードバック";
 
             CreateText("TutorialContent", tutorialPanel.transform, tutorialContent, 26, 
                 new Vector2(0, -20), new Vector2(700, 400), Color.white, FontStyle.Normal, TextAnchor.UpperLeft);
 
-            var beginBtn = CreateButton("BeginButton", tutorialPanel.transform, "开始训练", 
+            var beginBtn = CreateButton("BeginButton", tutorialPanel.transform, "トレーニング開始", 
                 new Vector2(100, -280), new Vector2(250, 55), new Color(0.2f, 0.7f, 0.3f));
             
-            var backBtn = CreateButton("BackButton", tutorialPanel.transform, "返回", 
+            var backBtn = CreateButton("BackButton", tutorialPanel.transform, "戻る", 
                 new Vector2(-100, -280), new Vector2(250, 55), new Color(0.5f, 0.5f, 0.5f));
 
             // 添加MainMenuUI脚本
@@ -203,28 +203,31 @@ namespace CPRSimulation.Editor
 
             // === 介绍面板 ===
             var introPanel = CreatePanel("IntroPanel", canvasObj.transform, new Color(0, 0, 0, 0.7f));
-            CreateText("IntroText", introPanel.transform, "CPR 心肺复苏训练\n\n准备开始...", 42, 
+            CreateText("IntroText", introPanel.transform, "CPR 心肺蘇生トレーニング\n\n準備中...", 42, 
                 Vector2.zero, new Vector2(600, 200), Color.white);
 
             // === 开始面板 ===
             var startPanel = CreatePanel("StartTrainingPanel", canvasObj.transform, new Color(0, 0, 0, 0.5f));
             startPanel.SetActive(false);
             
-            CreateText("StartHint", startPanel.transform, "准备就绪", 36, 
+            CreateText("StartHint", startPanel.transform, "準備完了", 36, 
                 new Vector2(0, 100), new Vector2(400, 60), Color.white);
             
-            var startScenarioBtn = CreateButton("StartScenarioButton", startPanel.transform, "开始情景", 
+            var startScenarioBtn = CreateButton("StartScenarioButton", startPanel.transform, "シナリオ開始", 
                 new Vector2(0, 0), new Vector2(280, 60), new Color(0.9f, 0.6f, 0.2f));
             
-            var startCPRBtn = CreateButton("StartCPRButton", startPanel.transform, "开始CPR", 
+            var startCPRBtn = CreateButton("StartCPRButton", startPanel.transform, "CPR開始", 
                 new Vector2(0, 0), new Vector2(280, 60), new Color(0.2f, 0.8f, 0.3f));
             startCPRBtn.SetActive(false);
+
+            var exitTrainingBtn = CreateButton("ExitTrainingButton", startPanel.transform, "終了", 
+                new Vector2(0, -80), new Vector2(220, 55), new Color(0.5f, 0.5f, 0.5f));
 
             // === 训练HUD ===
             var hudPanel = CreatePanel("TrainingHUDPanel", canvasObj.transform, new Color(0, 0, 0, 0));
             hudPanel.SetActive(false);
 
-            var phaseText = CreateText("PhaseText", hudPanel.transform, "CPR 进行中", 32, 
+            var phaseText = CreateText("PhaseText", hudPanel.transform, "CPR 実施中", 32, 
                 new Vector2(0, 280), new Vector2(400, 50), Color.yellow);
             
             var instructionText = CreateText("InstructionText", hudPanel.transform, "", 26, 
@@ -241,16 +244,16 @@ namespace CPRSimulation.Editor
             var completePanel = CreatePanel("CompletionPanel", canvasObj.transform, new Color(0, 0.1f, 0, 0.85f));
             completePanel.SetActive(false);
 
-            CreateText("CompleteTitle", completePanel.transform, "训练完成！", 48, 
+            CreateText("CompleteTitle", completePanel.transform, "トレーニング完了！", 48, 
                 new Vector2(0, 150), new Vector2(500, 80), Color.green, FontStyle.Bold);
             
             var resultText = CreateText("ResultText", completePanel.transform, "", 28, 
                 new Vector2(0, 20), new Vector2(500, 200), Color.white);
 
-            var restartBtn = CreateButton("RestartButton", completePanel.transform, "重新训练", 
+            var restartBtn = CreateButton("RestartButton", completePanel.transform, "やり直す", 
                 new Vector2(-120, -150), new Vector2(220, 55), new Color(0.3f, 0.6f, 0.9f));
             
-            var exitBtn = CreateButton("ExitButton", completePanel.transform, "返回菜单", 
+            var exitBtn = CreateButton("ExitButton", completePanel.transform, "メニューに戻る", 
                 new Vector2(120, -150), new Vector2(220, 55), new Color(0.5f, 0.5f, 0.5f));
 
             // === 创建训练控制器 ===
@@ -266,6 +269,7 @@ namespace CPRSimulation.Editor
             controller.startCPRButton = startCPRBtn.GetComponent<Button>();
             controller.restartButton = restartBtn.GetComponent<Button>();
             controller.exitButton = exitBtn.GetComponent<Button>();
+            controller.exitTrainingButton = exitTrainingBtn.GetComponent<Button>();
             controller.phaseText = phaseText.GetComponent<Text>();
             controller.instructionText = instructionText.GetComponent<Text>();
             controller.pressDetector = detector;

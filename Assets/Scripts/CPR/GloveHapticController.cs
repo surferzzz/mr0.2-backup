@@ -1,7 +1,5 @@
 using UnityEngine;
-#if BHAPTICS_SDK2
 using Bhaptics.SDK2;
-#endif
 
 namespace CPRSimulation
 {
@@ -34,6 +32,22 @@ namespace CPRSimulation
         [Header("震动时长 (毫秒)")]
         [Range(10, 100)] public int pulseDurationMs = 30;
 
+        [Header("bHaptics 事件（与 Developer 中事件名一致）")]
+        [Tooltip("优先使用事件名；留空则用马达强度")]
+        public bool useHapticEvents = true;
+        [Tooltip("按压过浅时播放")]
+        public string eventShallow = "cpr_shallow";
+        [Tooltip("按压深度合适时播放")]
+        public string eventGoodDepth = "cpr_good_depth";
+        [Tooltip("按压过深时播放")]
+        public string eventTooDeep = "cpr_too_deep";
+
+        [Header("反馈时机")]
+        [Tooltip("勾选：仅在每次按压完成时播放一次 cpr_* 事件（推荐，与手套三事件一一对应）")]
+        public bool feedbackOnCompleteOnly = true;
+        [Tooltip("未勾选时：按压过程中按深度实时震动（可能较频繁）")]
+        public bool realtimeDepthHapticWhenNotCompleteOnly = false;
+
         [Header("调试")]
         public bool logHapticEvents = true;
 
@@ -44,26 +58,106 @@ namespace CPRSimulation
 
         private float _lastRhythmTime;
         private const float GOOD_RHYTHM_INTERVAL = 0.545f; // 110 BPM 的间隔
+        private bool _isBound = false;
 
         private void Start()
         {
-            if (pressDetector == null)
-            {
-                pressDetector = FindObjectOfType<CPRPressDetector>();
-            }
+            InitializeArrays();
+            // CPRPressDetector 是运行时动态创建的，Start 时通常还不存在，
+            // 真正的绑定由 BindDetector() 完成（由 CPRTrainingController 在创建检测区后调用）。
+            // 此处仅做一次尝试性绑定，以兼容编辑器直接测试的情形。
+            if (pressDetector != null)
+                BindDetector(pressDetector);
+            else
+                Debug.Log("[GloveHapticController] 等待 CPRTrainingController 调用 BindDetector()");
+        }
 
+        /// <summary>
+        /// 绑定/切换 CPRPressDetector，自动取消旧订阅并订阅新事件。
+        /// CPRTrainingController 在创建检测区后必须调用此方法。
+        /// </summary>
+        public void BindDetector(CPRPressDetector detector)
+        {
+            // 取消旧订阅
+            if (pressDetector != null)
+            {
+                pressDetector.OnDepthChanged -= OnDepthChanged;
+                pressDetector.OnCompressionComplete -= OnCompressionComplete;
+                pressDetector.OnCompressionStart -= OnCompressionStart;
+            }
+            pressDetector = detector;
             if (pressDetector != null)
             {
                 pressDetector.OnDepthChanged += OnDepthChanged;
                 pressDetector.OnCompressionComplete += OnCompressionComplete;
                 pressDetector.OnCompressionStart += OnCompressionStart;
+                _isBound = true;
+                Debug.Log("[GloveHapticController] 已绑定 CPRPressDetector，事件订阅完成");
             }
             else
             {
-                Debug.LogWarning("[GloveHapticController] 未找到CPRPressDetector");
+                _isBound = false;
+                Debug.LogWarning("[GloveHapticController] BindDetector 传入了 null");
+            }
+        }
+
+        /// <summary>
+        /// 直接按深度触发触觉（由 CPRTrainingController.OnCompressionDetected 直接调用，不依赖事件订阅）
+        /// </summary>
+        public void TriggerByDepth(float depthCm)
+        {
+            if (depthCm <= 0f) depthCm = 3f;
+            string category = depthCm < minGoodDepthCm ? "过浅→cpr_shallow" : depthCm > maxGoodDepthCm ? "过深→cpr_too_deep" : "良好→cpr_good_depth";
+            Debug.Log($"[GloveHaptic] ★ TriggerByDepth depth={depthCm:F1}cm {category} bHaptics={BhapticsLibrary.IsBhapticsAvailable(false)}");
+            if (depthCm < minGoodDepthCm)    PlayShallowFeedback();
+            else if (depthCm > maxGoodDepthCm) PlayDeepWarning();
+            else                               PlayGoodFeedback();
+        }
+
+        private float minGoodDepthCm => pressDetector != null ? pressDetector.minGoodDepthCm : 5f;
+        private float maxGoodDepthCm => pressDetector != null ? pressDetector.maxGoodDepthCm : 6f;
+
+        /// <summary>
+        /// 停止当前及后续所有震动反馈（用于训练结束或中途退出）
+        /// </summary>
+        public void StopAllFeedback()
+        {
+            enableRateFeedback = false;
+            _lastRhythmTime = 0f;
+
+            // 取消事件订阅，防止后续再被触发
+            if (pressDetector != null)
+            {
+                pressDetector.OnDepthChanged -= OnDepthChanged;
+                pressDetector.OnCompressionComplete -= OnCompressionComplete;
+                pressDetector.OnCompressionStart -= OnCompressionStart;
+            }
+            pressDetector = null;
+            _isBound = false;
+
+            try
+            {
+                if (BhapticsLibrary.IsBhapticsAvailable(false))
+                {
+                    BhapticsLibrary.StopAll();
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[GloveHaptic] StopAllFeedback 调用失败: " + e.Message);
             }
 
-            InitializeArrays();
+            if (logHapticEvents)
+                Debug.Log("[GloveHaptic] StopAllFeedback: 已停止所有触觉反馈");
+        }
+
+        /// <summary>
+        /// 为新一轮训练重置内部状态（在 StartCPRPhase 时调用）。
+        /// </summary>
+        public void ResetForNewSession()
+        {
+            enableRateFeedback = true;
+            _lastRhythmTime = 0f;
         }
 
         private void OnDestroy()
@@ -87,6 +181,22 @@ namespace CPRSimulation
 
         private void Update()
         {
+            // 自动重试绑定：如果还没绑定，每秒扫一次场景里的 CPRPressDetector
+            if (!_isBound)
+            {
+                _autoBindTimer += Time.deltaTime;
+                if (_autoBindTimer >= 1f)
+                {
+                    _autoBindTimer = 0f;
+                    var det = FindObjectOfType<CPRPressDetector>();
+                    if (det != null)
+                    {
+                        Debug.Log("[GloveHapticController] Update 自动找到并绑定 CPRPressDetector");
+                        BindDetector(det);
+                    }
+                }
+            }
+
             if (!enableRateFeedback || pressDetector == null) return;
 
             // 如果速率过慢，提供节奏引导
@@ -101,70 +211,55 @@ namespace CPRSimulation
                 }
             }
         }
+        private float _autoBindTimer = 1f; // 启动就立刻扫一次
 
         /// <summary>
-        /// 深度变化时的实时反馈
+        /// 深度变化时的实时反馈（仅在未启用“仅完成时反馈”时生效）
         /// </summary>
         private void OnDepthChanged(float depthCm)
         {
-            if (depthCm < 1f) return; // 忽略微小深度
+            if (feedbackOnCompleteOnly && !realtimeDepthHapticWhenNotCompleteOnly) return;
+            if (depthCm < 1f) return;
 
             int intensity = CalculateIntensityByDepth(depthCm);
             PlayHapticPulse(intensity);
         }
 
         /// <summary>
-        /// 按压开始时的反馈
+        /// 按压开始时的反馈（仅完成模式时不播放，避免与完成时事件重复）
         /// </summary>
         private void OnCompressionStart()
         {
-            // 开始按压时轻微震动提示
+            if (feedbackOnCompleteOnly) return;
             PlayHapticPulse(20);
         }
 
         /// <summary>
-        /// 按压完成时的反馈
+        /// 按压完成时：按深度质量播放对应 bHaptics 事件（cpr_shallow / cpr_good_depth / cpr_too_deep）
         /// </summary>
         private void OnCompressionComplete(float depthCm, float rateBPM)
         {
             var depthStatus = pressDetector.DepthStatus;
             var rateStatus = pressDetector.RateStatus;
 
-            // 根据深度质量给出反馈
-            int intensity;
-            string feedback;
-
             switch (depthStatus)
             {
                 case DepthQuality.TooShallow:
-                    intensity = shallowIntensity;
-                    feedback = "太浅";
                     PlayShallowFeedback();
+                    if (logHapticEvents) Debug.Log($"[GloveHaptic] 按压完成 过浅 → {eventShallow} ({depthCm:F1}cm)");
                     break;
                 case DepthQuality.TooDeep:
-                    intensity = deepIntensity;
-                    feedback = "太深";
                     PlayDeepWarning();
+                    if (logHapticEvents) Debug.Log($"[GloveHaptic] 按压完成 过深 → {eventTooDeep} ({depthCm:F1}cm)");
                     break;
                 default:
-                    intensity = goodIntensity;
-                    feedback = "良好";
                     PlayGoodFeedback();
+                    if (logHapticEvents) Debug.Log($"[GloveHaptic] 按压完成 良好 → {eventGoodDepth} ({depthCm:F1}cm, {rateBPM:F0}BPM)");
                     break;
             }
 
-            // 速率反馈
-            string rateFeedback = rateStatus switch
-            {
-                RateQuality.TooSlow => "太慢",
-                RateQuality.TooFast => "太快",
-                _ => "节奏好"
-            };
-
-            if (logHapticEvents)
-            {
-                Debug.Log($"[GloveHaptic] 深度:{feedback}({depthCm:F1}cm) 速率:{rateFeedback}({rateBPM:F0}BPM) 强度:{intensity}");
-            }
+            if (logHapticEvents && (rateStatus == RateQuality.TooSlow || rateStatus == RateQuality.TooFast))
+                Debug.Log($"[GloveHaptic] 速率: {(rateStatus == RateQuality.TooSlow ? "偏慢" : "偏快")} {rateBPM:F0}BPM");
         }
 
         /// <summary>
@@ -193,30 +288,69 @@ namespace CPRSimulation
         }
 
         /// <summary>
-        /// 深度过浅的反馈 - 短促弱震动
+        /// 深度过浅的反馈 - 短促弱震动 或 播放 cpr_shallow 事件
         /// </summary>
         private void PlayShallowFeedback()
         {
+            if (useHapticEvents && !string.IsNullOrEmpty(eventShallow))
+            {
+                try
+                {
+                    BhapticsLibrary.Play(eventShallow);
+                    if (logHapticEvents) Debug.Log("[GloveHaptic] 播放事件: " + eventShallow);
+                    return;
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning("[GloveHaptic] Play 事件失败，降级为 PlayMotors: " + e.Message);
+                }
+            }
             SetAllMotors(shallowIntensity);
             _durations[0] = 20;
             PlayBothGloves();
         }
 
         /// <summary>
-        /// 深度良好的反馈 - 平稳中等震动
+        /// 深度良好的反馈 - 平稳中等震动 或 播放 cpr_good_depth 事件
         /// </summary>
         private void PlayGoodFeedback()
         {
+            if (useHapticEvents && !string.IsNullOrEmpty(eventGoodDepth))
+            {
+                try
+                {
+                    BhapticsLibrary.Play(eventGoodDepth);
+                    if (logHapticEvents) Debug.Log("[GloveHaptic] 播放事件: " + eventGoodDepth);
+                    return;
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning("[GloveHaptic] Play 事件失败，降级为 PlayMotors: " + e.Message);
+                }
+            }
             SetAllMotors(goodIntensity);
             _durations[0] = pulseDurationMs;
             PlayBothGloves();
         }
 
         /// <summary>
-        /// 深度过深的警告 - 强烈震动
+        /// 深度过深的警告 - 强烈震动 或 播放 cpr_too_deep 事件
         /// </summary>
         private void PlayDeepWarning()
         {
+            if (useHapticEvents && !string.IsNullOrEmpty(eventTooDeep))
+            {
+                try
+                {
+                    BhapticsLibrary.Play(eventTooDeep);
+                    if (logHapticEvents) Debug.Log("[GloveHaptic] 播放事件: " + eventTooDeep);
+                    return;
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning("[GloveHaptic] Play 事件失败，降级为 PlayMotors: " + e.Message);
+                }
+            }
             SetAllMotors(deepIntensity);
             _durations[0] = 50;
             PlayBothGloves();
@@ -259,7 +393,6 @@ namespace CPRSimulation
 
         private void PlayBothGloves()
         {
-#if BHAPTICS_SDK2
             if (!BhapticsLibrary.IsBhapticsAvailable(false))
             {
                 if (logHapticEvents)
@@ -269,14 +402,8 @@ namespace CPRSimulation
                 return;
             }
 
-            BhapticsLibrary.PlayGlove(PositionType.GloveL, _motors, _durations, _shapes);
-            BhapticsLibrary.PlayGlove(PositionType.GloveR, _motors, _durations, _shapes);
-#else
-            if (logHapticEvents)
-            {
-                Debug.Log($"[GloveHaptic] 模拟震动 - 强度: {_motors[0]}");
-            }
-#endif
+            BhapticsLibrary.PlayMotors((int)PositionType.GloveL, _motors, pulseDurationMs);
+            BhapticsLibrary.PlayMotors((int)PositionType.GloveR, _motors, pulseDurationMs);
         }
 
         /// <summary>
