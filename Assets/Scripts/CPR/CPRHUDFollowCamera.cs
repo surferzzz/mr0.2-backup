@@ -25,6 +25,18 @@ namespace CPRSimulation
         [Tooltip("仅绕 Y 轴朝向用户（可读性更好）。关闭则保持锚点朝向。")]
         public bool faceCamera = true;
 
+        [Tooltip("朝向平滑时间常数（秒）。0=瞬间转到位。位置本来就有平滑，" +
+                 "朝向若是瞬间赋值，就会出现「位置慢慢跟、朝向猛地弹」。")]
+        [Range(0f, 1f)] public float rotationSmoothing = 0.25f;
+
+        [Tooltip("俯身按压时视线几乎正对面板上方，把 y 归零后的水平向量极短，" +
+                 "方位角会剧烈抖动甚至 180° 翻转。水平距离小于此值就保持当前朝向。")]
+        [Range(0f, 1f)] public float faceDeadzoneRadius = 0.35f;
+
+        [Tooltip("首次朝向用户后锁定，不再跟随。按压过程中用户基本不动，" +
+                 "持续 billboard 只会带来抖动 —— 觉得转动碍事就打开这个。")]
+        public bool lockFacingAfterFirstOrient = false;
+
         [Header("其它")]
         [Tooltip("不靠近患者时：UI 与摄像头的水平距离（米）")]
         public float distanceInFront = 0.75f;
@@ -49,6 +61,7 @@ namespace CPRSimulation
         private Canvas _canvas;
         private Transform _patientAnchor;
         private bool _hasInitializedPosition;
+        private bool _hasOrientedOnce;
 
         private void Start()
         {
@@ -157,13 +170,28 @@ namespace CPRSimulation
                     1f - Mathf.Exp(-Time.deltaTime / followSmoothing));
             }
 
-            if (faceCamera && _cameraTransform != null)
+            if (faceCamera && _cameraTransform != null && !(_hasOrientedOnce && lockFacingAfterFirstOrient))
             {
                 // 仅绕 Y 轴朝向用户，保持竖直可读；这只改朝向、不改位置，不会绕点漂移
                 Vector3 faceDir = transform.position - _cameraTransform.position;
                 faceDir.y = 0f;
-                if (faceDir.sqrMagnitude > 1e-4f)
-                    transform.rotation = Quaternion.LookRotation(faceDir.normalized, Vector3.up);
+
+                // 死区：俯身到面板正上方附近时水平向量退化，方位角不再可信，保持原朝向。
+                // 原来的阈值是 1e-4（约 1cm），在 5-30cm 这个真实按压距离上完全挡不住抖动。
+                if (faceDir.sqrMagnitude > faceDeadzoneRadius * faceDeadzoneRadius)
+                {
+                    var target = Quaternion.LookRotation(faceDir.normalized, Vector3.up);
+
+                    if (!_hasOrientedOnce || rotationSmoothing <= 0f)
+                        transform.rotation = target;
+                    else
+                        transform.rotation = Quaternion.Slerp(
+                            transform.rotation,
+                            target,
+                            1f - Mathf.Exp(-Time.deltaTime / rotationSmoothing));
+
+                    _hasOrientedOnce = true;
+                }
             }
         }
     }

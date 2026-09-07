@@ -206,6 +206,7 @@ namespace CPRSimulation.Game
             BuildLanguageSelectButtons();   // 在开始面板上创建语言切换按钮
             SetupCPRDetector();
             EnsureHapticController();
+            EnsureAudio();
 
             if (LanguageManager.Instance != null)
                 LanguageManager.Instance.OnLanguageChanged += RefreshAllTrainingUI;
@@ -1176,6 +1177,50 @@ namespace CPRSimulation.Game
                 Debug.Log("[CPRTraining] 场景中未找到 GloveHapticController，已自动创建");
             }
             Debug.Log($"[CPRTraining] hapticController={hapticController != null} ({(hapticController != null ? hapticController.gameObject.name : "null")})");
+        }
+
+        private CPRMetronome _metronome;
+
+        /// <summary>
+        /// 项目里 Assets/Audio 是空的，audioSource 和 4 个 AudioClip 在场景中也都没赋值，
+        /// 于是 PlaySound() 一直是空操作 —— 训练全程无声。
+        /// 这里补上 AudioSource 并为未指定的音效生成合成音；
+        /// 以后若在 Inspector 里挂上真实素材，会自动优先使用素材。
+        /// </summary>
+        private void EnsureAudio()
+        {
+            if (audioSource == null)
+                audioSource = GetComponent<AudioSource>();
+            if (audioSource == null)
+                audioSource = gameObject.AddComponent<AudioSource>();
+
+            audioSource.playOnAwake = false;
+            audioSource.spatialBlend = 0f;   // 提示音是 2D 的，不随头部朝向衰减
+
+            if (introSound == null)
+                introSound = ProceduralAudio.CreateSequence("CPR_Intro", new[] { 523.25f, 659.25f });
+            if (fallSound == null)
+                fallSound = ProceduralAudio.CreateClick("CPR_Fall", 180f, 0.35f, 9f);
+            if (startCPRSound == null)
+                startCPRSound = ProceduralAudio.CreateSequence("CPR_Start", new[] { 659.25f, 880f });
+            if (completeSound == null)
+                completeSound = ProceduralAudio.CreateSequence(
+                    "CPR_Complete", new[] { 523.25f, 659.25f, 783.99f, 1046.5f });
+
+            _metronome = FindObjectOfType<CPRMetronome>();
+            if (_metronome == null)
+            {
+                var go = new GameObject("CPRMetronome");
+                go.transform.SetParent(transform, false);
+                _metronome = go.AddComponent<CPRMetronome>();
+            }
+
+            // 节拍取合格区间中值，保证「听到的节奏」和「评分标准」是同一个。
+            float minRate = pressDetector != null ? pressDetector.minGoodRateBPM : 100f;
+            float maxRate = pressDetector != null ? pressDetector.maxGoodRateBPM : 120f;
+            _metronome.bpm = Mathf.Clamp((minRate + maxRate) * 0.5f, 60f, 140f);
+
+            Debug.Log($"[CPRTraining] 音频就绪：节拍器 {_metronome.bpm:F0} BPM");
         }
 
         private float _diagTimer;
@@ -3332,6 +3377,11 @@ namespace CPRSimulation.Game
         {
             currentPhase = newPhase;
             OnPhaseChanged?.Invoke(newPhase);
+
+            // 集中在这里起停节拍器：所有进入/离开按压阶段的路径都经过 ChangePhase，
+            // 包括正常完成、中途退出和重新开始，不会有漏掉的分支。
+            if (_metronome != null)
+                _metronome.SetRunning(newPhase == TrainingPhase.CPRInProgress);
 
             if (phaseText != null)
             {

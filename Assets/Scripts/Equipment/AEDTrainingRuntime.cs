@@ -51,6 +51,9 @@ namespace VRFirstAid.Equipment
         private static readonly Vector3 AedModelHostLocalScale = Vector3.one * 0.28639f;
         private static readonly Vector3 AedElectrodeLocalPosition = new Vector3(-0.059f, 0.085f, -0.811f);
         private static readonly Vector3 AedElectrodeLocalEulerAngles = new Vector3(180f, 0f, -180f);
+
+        // 找不到静置家具时的地面兜底位置：房间内(x -4..4, z -3..3.5)、患者与等候区之间。
+        private static readonly Vector3 AedFloorFallbackPosition = new Vector3(1.6f, 0f, -1.2f);
         private static readonly Vector3 AedPowerMarkerLocalPosition = new Vector3(-0.921f, 0.112f, 1.14f);
 
         [Tooltip("调试用：勾选后每次分析都判定为可电击心律，忽略下方概率。")]
@@ -66,6 +69,19 @@ namespace VRFirstAid.Equipment
         [Range(0f, 1f)]
         [SerializeField] private float voiceVolume = 0.9f;
         [SerializeField] private Vector3 patientSideOffset = new Vector3(0.55f, 0.02f, 0.22f);
+
+        [Header("开局摆放")]
+        [Tooltip("训练一开始就把 AED 摆在房间里，而不是等患者倒地后凭空出现。" +
+                 "顺带会提前加载模型，消除 AED 阶段切换时的加载卡顿。")]
+        [SerializeField] private bool showAedFromStart = true;
+
+        [Tooltip("AED 静置在哪个家具上。留空则退回地面。房间里唯一的桌子是 Waiting_Table；" +
+                 "床边只有 Visitor_Bench，没有床头小桌。")]
+        [SerializeField] private string restingFurnitureName = "Waiting_Table";
+
+        [Tooltip("进入 AED 阶段时是否把整套场景搬到患者身旁。" +
+                 "关闭则 AED 留在原处，学员需要走过去操作（交互距离未经验证，改前先测）。")]
+        [SerializeField] private bool relocateToPatientOnAedPhase = true;
         [SerializeField] private Color powerMarkerColor = new Color(0.1f, 0.8f, 1f, 0.95f);
         [SerializeField] private Color padMarkerColor = new Color(1f, 0.85f, 0.15f, 0.95f);
         [SerializeField] private Color completedPadColor = new Color(0.15f, 0.95f, 0.35f, 0.95f);
@@ -76,6 +92,14 @@ namespace VRFirstAid.Equipment
         private HandTrackingAdapter handTrackingAdapter;
         private Transform patientRoot;
         private Transform chestReference;
+
+        // FindChestReference() 里有一次 FindObjectOfType 和最多 5 次骨骼递归遍历。
+        // 它原来在 Update() 每帧执行，而且发生在 scenarioVisible 提前返回之前，
+        // 所以连「只练 CPR」的场次也在白烧这份开销。
+        // 现在：拿到检测器的 chestSurface 之后就不再重算；在此之前每 0.5s 重试一次，
+        // 避免把 patientRoot 这个降级结果永久缓存下来。
+        private float _nextChestResolveTime;
+        private bool _chestReferenceFromDetector;
         private GameObject scenarioRoot;
         private GameObject modelHost;
         private GltfAsset gltfAsset;
@@ -178,6 +202,11 @@ namespace VRFirstAid.Equipment
         private void Start()
         {
             ResolveSceneReferences();
+
+            if (showAedFromStart)
+            {
+                StartCoroutine(ShowAedAtRestingPlace());
+            }
         }
 
         private void Update()
@@ -226,7 +255,13 @@ namespace VRFirstAid.Equipment
                 patientRoot = FindPatientRoot();
             }
 
-            chestReference = FindChestReference();
+            if (force
+                || chestReference == null
+                || (!_chestReferenceFromDetector && Time.unscaledTime >= _nextChestResolveTime))
+            {
+                _nextChestResolveTime = Time.unscaledTime + 0.5f;
+                chestReference = FindChestReference(out _chestReferenceFromDetector);
+            }
 
             if (trainingController != null && trainingController != subscribedTrainingController)
             {
@@ -321,7 +356,14 @@ namespace VRFirstAid.Equipment
                 yield break;
             }
 
-            PositionScenarioNearPatient();
+            // 关闭这个开关时，AED 留在静置家具上，学员需要走过去操作。
+            // 交互半径（InteractionRadius / PadInteractionRadius）是按「AED 就在患者旁」
+            // 调过的，远距操作没验证过，所以默认仍然搬到患者身旁。
+            if (relocateToPatientOnAedPhase)
+            {
+                PositionScenarioNearPatient();
+            }
+
             trainingController.HideCprUiForAedMode();
             CreateOrUpdatePadTargets();
             EnsurePhysicalPads();
@@ -387,6 +429,14 @@ namespace VRFirstAid.Equipment
 
                 gltfAsset = modelHost.AddComponent<GltfAsset>();
                 gltfAsset.LoadOnStartup = false;
+
+                // glTFast 的默认值是 GenerateMipMaps=false、AnisotropicFilterLevel=1，
+                // 电极片(1024²)和两个按钮贴图在斜视/远距时会闪烁走样。
+                gltfAsset.ImportSettings = new ImportSettings
+                {
+                    GenerateMipMaps = true,
+                    AnisotropicFilterLevel = 4,
+                };
             }
 
             if (!loadRequested)
@@ -543,8 +593,70 @@ namespace VRFirstAid.Equipment
         {
             FitModelToTrainingScale();
             ApplyManualAedTransforms();
+            TuneLoadedMaterials();
             CreateOrUpdateAedMarkers();
             scenarioRoot.SetActive(false);
+        }
+
+        // .glb 里 12 个材质的 roughnessFactor 全是 0.218（一个 0.156），那是抛光塑料的数值。
+        // 真实 AED 外壳是磨砂 ABS，应在 0.6-0.8。0.218 会在机身上打出又紧又亮的高光，
+        // 而这个模型的机身没有任何贴图去打断高光，结果就是廉价塑料的观感。
+        private const float AedHousingRoughness = 0.65f;
+        private const float AedRubberRoughness = 0.85f;
+
+        private void TuneLoadedMaterials()
+        {
+            if (modelHost == null)
+                return;
+
+            // 用 sharedMaterials：glTFast 的材质是运行时从 .glb 生成的，没有磁盘资产会被改坏，
+            // 而且共享改一次就够，不会像 materials 那样为每个 Renderer 复制一份。
+            var seen = new System.Collections.Generic.HashSet<Material>();
+            int tuned = 0;
+
+            foreach (var renderer in modelHost.GetComponentsInChildren<Renderer>(true))
+            {
+                foreach (var mat in renderer.sharedMaterials)
+                {
+                    if (mat == null || !seen.Add(mat))
+                        continue;
+
+                    bool isRubber = mat.name.IndexOf("rubber", System.StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (TrySetRoughness(mat, isRubber ? AedRubberRoughness : AedHousingRoughness))
+                        tuned++;
+                }
+            }
+
+            Debug.Log($"[AEDTrainingRuntime] 材质粗糙度已修正 {tuned}/{seen.Count} 个" +
+                      $"（机身 {AedHousingRoughness}，橡胶 {AedRubberRoughness}）");
+        }
+
+        /// <summary>
+        /// glTFast 的 shader 用 glTF 原生命名（roughnessFactor），
+        /// Unity Standard 系用 smoothness 语义（= 1 - roughness）。两种都兼容，
+        /// 这样以后项目迁到 URP 也不用改这里。
+        /// </summary>
+        private static bool TrySetRoughness(Material mat, float roughness)
+        {
+            if (mat.HasProperty("roughnessFactor"))
+            {
+                mat.SetFloat("roughnessFactor", roughness);
+                return true;
+            }
+            if (mat.HasProperty("_Smoothness"))
+            {
+                mat.SetFloat("_Smoothness", 1f - roughness);
+                return true;
+            }
+            if (mat.HasProperty("_Glossiness"))
+            {
+                mat.SetFloat("_Glossiness", 1f - roughness);
+                return true;
+            }
+
+            Debug.LogWarning($"[AEDTrainingRuntime] 材质「{mat.name}」(shader {mat.shader?.name}) " +
+                             "没有可识别的粗糙度属性，已跳过");
+            return false;
         }
 
         private void ApplyManualAedTransforms()
@@ -1106,6 +1218,126 @@ namespace VRFirstAid.Equipment
             Color color = completed ? completedPadColor : padMarkerColor;
             renderer.sharedMaterial.color = color;
             renderer.sharedMaterial.SetColor("_EmissionColor", color * 1.8f);
+        }
+
+        /// <summary>
+        /// 开局把 AED 摆到静置家具上。模型是异步从 StreamingAssets 加载的，所以要先等
+        /// EnsureModelReady()。这里只让模型本体现身：交互标记、贴片目标和世界 UI 由
+        /// ResetScenario 单独关闭，scenarioVisible 保持 false，
+        /// 因此 Update() 里的交互处理不会提前启动。
+        /// </summary>
+        private IEnumerator ShowAedAtRestingPlace()
+        {
+            yield return EnsureModelReady();
+
+            if (scenarioRoot == null || modelHost == null)
+            {
+                yield break;
+            }
+
+            HideInstructionOverlay();
+            scenarioRoot.SetActive(true);   // 先激活，包围盒才读得到
+            PlaceScenarioOnRestingSpot();
+        }
+
+        private void PlaceScenarioOnRestingSpot()
+        {
+            Transform furniture = string.IsNullOrWhiteSpace(restingFurnitureName)
+                ? null
+                : GameObject.Find(restingFurnitureName)?.transform;
+
+            if (!TryGetSurfaceTop(furniture, out Vector3 surfaceTop))
+            {
+                surfaceTop = AedFloorFallbackPosition;
+                Debug.LogWarning($"[AEDTrainingRuntime] 未找到家具「{restingFurnitureName}」，AED 退回地面摆放");
+            }
+
+            // 让 AED 面板朝向房间中心，学员一眼能看到
+            Vector3 towardRoomCenter = new Vector3(-surfaceTop.x, 0f, -surfaceTop.z);
+            scenarioRoot.transform.rotation = towardRoomCenter.sqrMagnitude > 0.001f
+                ? Quaternion.LookRotation(towardRoomCenter.normalized, Vector3.up)
+                : Quaternion.identity;
+
+            // modelHost 在 scenarioRoot 局部空间里有约 1.5m 的偏移，
+            // 所以要反推 scenarioRoot 的位置，才能让「模型」而不是「根节点」落在台面上。
+            scenarioRoot.transform.position =
+                surfaceTop - scenarioRoot.transform.rotation * AedModelHostLocalPosition;
+
+            // 再用模型真实的渲染包围盒把底面精确压到台面，
+            // 这样不依赖任何硬编码高度，换模型也不会悬空或陷进去。
+            if (TryGetWorldBounds(modelHost, out Bounds modelBounds))
+            {
+                scenarioRoot.transform.position += Vector3.up * (surfaceTop.y - modelBounds.min.y);
+            }
+
+            HideScenarioInteractables();
+
+            worldUiPoseFixed = false;
+            Debug.Log($"[AEDTrainingRuntime] AED 静置于「{(furniture != null ? furniture.name : "地面")}」" +
+                      $"，台面 y={surfaceTop.y:F3}");
+        }
+
+        /// <summary>
+        /// 静置状态下只该看到 AED 本体。scenarioRoot.SetActive(true) 会把所有
+        /// 没被单独禁用的子物体一并放出来 —— powerMarker/shockMarker 在
+        /// PrepareLoadedModel() 阶段就已创建且处于激活状态，会露出一个青色小球。
+        /// 贴片和目标点要到 AED 阶段才创建，这里一并做防御性处理。
+        /// </summary>
+        private void HideScenarioInteractables()
+        {
+            // 只关那些确实有对应 SetActive(true) 会把它们放回来的对象：
+            //   powerMarker  -> BeginScenario
+            //   shockMarker  -> 判定建议电击时
+            //   *PadTarget   -> 电极包打开后
+            // controlPanel 和 *PhysicalPad 全项目都没有 SetActive(true)，
+            // 关掉就再也开不回来，所以这里绝对不能碰。
+            SetActiveSafe(powerMarker, false);
+            SetActiveSafe(shockMarker, false);
+            SetActiveSafe(leftPadTarget, false);
+            SetActiveSafe(rightPadTarget, false);
+            HideInstructionOverlay();
+        }
+
+        private static void SetActiveSafe(GameObject go, bool active)
+        {
+            if (go != null && go.activeSelf != active)
+            {
+                go.SetActive(active);
+            }
+        }
+
+        private static bool TryGetSurfaceTop(Transform furniture, out Vector3 top)
+        {
+            top = Vector3.zero;
+            if (furniture == null || !TryGetWorldBounds(furniture.gameObject, out Bounds b))
+            {
+                return false;
+            }
+
+            top = new Vector3(b.center.x, b.max.y, b.center.z);
+            return true;
+        }
+
+        private static bool TryGetWorldBounds(GameObject root, out Bounds bounds)
+        {
+            bounds = default;
+            if (root == null)
+            {
+                return false;
+            }
+
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length == 0)
+            {
+                return false;
+            }
+
+            bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+            {
+                bounds.Encapsulate(renderers[i].bounds);
+            }
+            return true;
         }
 
         private void PositionScenarioNearPatient()
@@ -3215,6 +3447,14 @@ namespace VRFirstAid.Equipment
 
             HideInstructionOverlay();
             UpdateControlButtons();
+
+            // 复位后 AED 应该回到静置家具上，而不是整个消失 —— 它是房间的一部分，
+            // 训练开始前和结束后都该看得见。此时模型已加载完，不需要再走协程。
+            if (showAedFromStart && modelPrepared && scenarioRoot != null)
+            {
+                scenarioRoot.SetActive(true);
+                PlaceScenarioOnRestingSpot();
+            }
         }
 
         private Transform FindPatientRoot()
@@ -3239,11 +3479,18 @@ namespace VRFirstAid.Equipment
             return null;
         }
 
-        private Transform FindChestReference()
+        /// <param name="fromDetector">
+        /// true 表示拿到的是 CPRPressDetector.chestSurface —— 这是最准的来源，
+        /// 调用方据此停止重算。其余结果都是降级的，需要继续重试。
+        /// </param>
+        private Transform FindChestReference(out bool fromDetector)
         {
+            fromDetector = false;
+
             CPRPressDetector pressDetector = FindObjectOfType<CPRPressDetector>();
             if (pressDetector != null && pressDetector.chestSurface != null)
             {
+                fromDetector = true;
                 return pressDetector.chestSurface;
             }
 

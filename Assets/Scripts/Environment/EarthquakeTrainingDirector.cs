@@ -27,6 +27,13 @@ public class EarthquakeTrainingDirector : MonoBehaviour
     public Vector3 whiteboardPosition = new Vector3(0f, 1.69f, 3.44f);
     public float whiteboardRotationY = 0f;
     public float whiteboardCanvasScale = 0.001f;
+
+    // 白板固定在 z=3.44 的墙上，画布 scale 0.001 => 1000 px/m，即 1px = 1mm。
+    // VR 正文可读性经验值是视角 >= 1.5°；在 3.44m 处换算：
+    //   需要高度 = 2 * 3.44 * tan(0.75°) ≈ 0.090 m => 90 px
+    // 原来的 42px 只有 0.70°、按钮 38px 只有 0.63°，都远低于可读线。
+    private const int WhiteboardFontSize = 90;
+    private const int WhiteboardFontMinSize = 60;   // 下限 60px ≈ 1.0°，Best Fit 收缩时的兜底
     public float frontOffset = 0.06f;
 
     private bool _earthquakeStarted;
@@ -188,17 +195,19 @@ public class EarthquakeTrainingDirector : MonoBehaviour
                 statusRect.anchorMax = new Vector2(0.5f, 0.5f);
                 statusRect.pivot = new Vector2(0.5f, 0.5f);
                 statusRect.anchoredPosition = new Vector2(0f, 120f);
-                statusRect.sizeDelta = new Vector2(1280f, 180f);
+                // 高度从 180 提到 260，容纳放大后的两行文字（90px × 2 行 × 1.2 行距 ≈ 216）
+                statusRect.sizeDelta = new Vector2(1280f, 260f);
                 statusRect.localScale = Vector3.one;
             }
 
             statusText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            statusText.fontSize = 42;
+            statusText.fontSize = WhiteboardFontSize;
             statusText.fontStyle = FontStyle.Bold;
             statusText.alignment = TextAnchor.MiddleCenter;
             statusText.resizeTextForBestFit = true;
-            statusText.resizeTextMinSize = 28;
-            statusText.resizeTextMaxSize = 42;
+            // Best Fit 开启时 fontSize 被忽略，实际字号由 min/max 决定 —— 必须一起抬高
+            statusText.resizeTextMinSize = WhiteboardFontMinSize;
+            statusText.resizeTextMaxSize = WhiteboardFontSize;
             statusText.horizontalOverflow = HorizontalWrapMode.Wrap;
             statusText.verticalOverflow = VerticalWrapMode.Overflow;
             VRTrainingUIStyle.ApplyText(statusText, UIColorScheme.TextPrimary, true);
@@ -213,7 +222,8 @@ public class EarthquakeTrainingDirector : MonoBehaviour
                 buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
                 buttonRect.pivot = new Vector2(0.5f, 0.5f);
                 buttonRect.anchoredPosition = new Vector2(0f, -135f);
-                buttonRect.sizeDelta = new Vector2(540f, 126f);
+                // 放大以容纳 90px 标签（内边距上下各 8）
+                buttonRect.sizeDelta = new Vector2(620f, 150f);
                 buttonRect.localScale = Vector3.one;
             }
 
@@ -233,12 +243,12 @@ public class EarthquakeTrainingDirector : MonoBehaviour
                 }
 
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                label.fontSize = 38;
+                label.fontSize = WhiteboardFontSize;
                 label.fontStyle = FontStyle.Bold;
                 label.alignment = TextAnchor.MiddleCenter;
                 label.resizeTextForBestFit = true;
-                label.resizeTextMinSize = 24;
-                label.resizeTextMaxSize = 38;
+                label.resizeTextMinSize = WhiteboardFontMinSize;
+                label.resizeTextMaxSize = WhiteboardFontSize;
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Overflow;
                 VRTrainingUIStyle.ApplyText(label, UIColorScheme.TextPrimary, true);

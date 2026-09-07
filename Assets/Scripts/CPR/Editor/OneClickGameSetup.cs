@@ -162,12 +162,19 @@ namespace CPRSimulation.Editor
             // 创建简易患者模型
             var patient = CreateSimplePatient();
 
-            // 创建灯光
-            var light = new GameObject("DirectionalLight");
-            var lightComp = light.AddComponent<Light>();
-            lightComp.type = LightType.Directional;
+            // 创建灯光：场景里已有方向光就复用，否则每次运行都会多出一盏，
+            // 角度还完全相同，叠成双倍太阳。
+            var lightComp = System.Array.Find(
+                UnityEngine.Object.FindObjectsOfType<Light>(true),
+                l => l.type == LightType.Directional);
+            if (lightComp == null)
+            {
+                var light = new GameObject("DirectionalLight");
+                lightComp = light.AddComponent<Light>();
+                lightComp.type = LightType.Directional;
+            }
             lightComp.intensity = 1f;
-            light.transform.rotation = Quaternion.Euler(50, -30, 0);
+            lightComp.transform.rotation = Quaternion.Euler(50, -30, 0);
 
             // 创建CPR检测器
             var detectorObj = new GameObject("CPR_ChestDetector");
