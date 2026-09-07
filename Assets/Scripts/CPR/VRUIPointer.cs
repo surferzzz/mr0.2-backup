@@ -175,31 +175,48 @@ namespace CPRSimulation
             var canvases = FindObjectsOfType<Canvas>();
             foreach (var canvas in canvases)
             {
-                if (canvas.renderMode == RenderMode.WorldSpace)
-                {
-                    // 设置 worldCamera 为 CenterEyeAnchor 的相机
-                    if (canvas.worldCamera == null && _cameraRig.centerEyeAnchor != null)
-                    {
-                        var cam = _cameraRig.centerEyeAnchor.GetComponent<Camera>();
-                        if (cam != null)
-                        {
-                            canvas.worldCamera = cam;
-                        }
-                    }
-
-                    // 添加 OVRRaycaster（如果没有的话）
-                    if (canvas.GetComponent<OVRRaycaster>() == null)
-                    {
-                        var ovrRaycaster = canvas.gameObject.AddComponent<OVRRaycaster>();
-                        ovrRaycaster.pointer = _laser.gameObject;
-
-                        // 禁用标准 GraphicRaycaster，用 OVRRaycaster 代替
-                        var graphicRaycaster = canvas.GetComponent<UnityEngine.UI.GraphicRaycaster>();
-                        if (graphicRaycaster != null)
-                            graphicRaycaster.enabled = false;
-                    }
-                }
+                RegisterWorldSpaceCanvas(canvas);
             }
+        }
+
+        /// <summary>
+        /// 让一个 WorldSpace Canvas 支持手部射线/手柄射线点击。
+        /// 运行时动态创建的面板（如 AED 控制面板）可调用此方法，或由本组件周期性自动扫描。
+        /// </summary>
+        public bool RegisterWorldSpaceCanvas(Canvas canvas)
+        {
+            if (canvas == null || canvas.renderMode != RenderMode.WorldSpace || _cameraRig == null)
+                return false;
+
+            // 设置 worldCamera 为 CenterEyeAnchor 的相机
+            if (canvas.worldCamera == null && _cameraRig.centerEyeAnchor != null)
+            {
+                var cam = _cameraRig.centerEyeAnchor.GetComponent<Camera>();
+                if (cam != null)
+                    canvas.worldCamera = cam;
+            }
+
+            // 添加 OVRRaycaster（如果没有的话），让手/柄射线能命中该 Canvas
+            if (canvas.GetComponent<OVRRaycaster>() == null)
+            {
+                var ovrRaycaster = canvas.gameObject.AddComponent<OVRRaycaster>();
+                if (_laser != null)
+                    ovrRaycaster.pointer = _laser.gameObject;
+
+                // 禁用标准 GraphicRaycaster，用 OVRRaycaster 代替
+                var graphicRaycaster = canvas.GetComponent<UnityEngine.UI.GraphicRaycaster>();
+                if (graphicRaycaster != null)
+                    graphicRaycaster.enabled = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary> 重新扫描场景中的 WorldSpace Canvas（用于注册运行时新建的面板）。 </summary>
+        public void RescanCanvases()
+        {
+            SetupCanvasForVR();
         }
 
         private void Update()
@@ -209,6 +226,10 @@ namespace CPRSimulation
             UpdatePointerOrigin();
             if (_inputModule != null && _inputModule.rayTransform != _pointerOrigin)
                 _inputModule.rayTransform = _pointerOrigin;
+
+            // 周期性扫描，注册运行时动态创建的 WorldSpace 面板（如 AED 控制面板）
+            if (Time.frameCount % 30 == 0)
+                SetupCanvasForVR();
 
             bool pinchOrTrigger = OVRInput.Get(clickButton);
             bool showRay = !showRayOnlyWhenPinching || pinchOrTrigger;

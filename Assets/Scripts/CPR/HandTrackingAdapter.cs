@@ -19,6 +19,9 @@ namespace CPRSimulation
         [Tooltip("允许双手检测")]
         public bool allowBothHands = true;
 
+        [Tooltip("使用掌心(腕根与中指掌骨中点)作为接触点，比单用腕根更接近真实掌根按压点。")]
+        public bool usePalmCenter = true;
+
         [Header("OVR引用")]
         public OVRHand leftOVRHand;
         public OVRHand rightOVRHand;
@@ -42,8 +45,15 @@ namespace CPRSimulation
         private OVRSkeleton _rightSkeleton;
         private Transform _leftPalmBone;
         private Transform _rightPalmBone;
+        private Transform _leftMiddleBone;
+        private Transform _rightMiddleBone;
         private Transform _leftHandAnchor;
         private Transform _rightHandAnchor;
+        // 掌心代理：每帧更新为「腕根/中指掌骨」中点，作为更准确的接触点
+        private Transform _leftPalmProxy;
+        private Transform _rightPalmProxy;
+        private bool _leftPalmProxyValid;
+        private bool _rightPalmProxyValid;
 
         public bool IsLeftTracking => _leftTracking;
         public bool IsRightTracking => _rightTracking;
@@ -56,6 +66,12 @@ namespace CPRSimulation
             {
                 FindOVRHands();
             }
+
+            // 掌心代理对象（运行时创建，不参与场景保存）
+            _leftPalmProxy = new GameObject("CPR_LeftPalmCenter").transform;
+            _rightPalmProxy = new GameObject("CPR_RightPalmCenter").transform;
+            _leftPalmProxy.SetParent(transform, false);
+            _rightPalmProxy.SetParent(transform, false);
 
             if (pressDetector == null)
             {
@@ -106,17 +122,51 @@ namespace CPRSimulation
         private void Update()
         {
             UpdateTrackingStatus();
+            UpdatePalmProxies();
             UpdateDetectorReference();
+        }
+
+        /// <summary>
+        /// 每帧把掌心代理放到「腕根与中指掌骨中点」，更贴近真实掌根接触点。
+        /// 缺中指骨时退化为腕根位置。
+        /// </summary>
+        private void UpdatePalmProxies()
+        {
+            _leftPalmProxyValid = UpdatePalmProxy(_leftPalmProxy, _leftPalmBone, _leftMiddleBone);
+            _rightPalmProxyValid = UpdatePalmProxy(_rightPalmProxy, _rightPalmBone, _rightMiddleBone);
+        }
+
+        private bool UpdatePalmProxy(Transform proxy, Transform wrist, Transform middle)
+        {
+            if (proxy == null || wrist == null) return false;
+            proxy.position = (middle != null)
+                ? Vector3.Lerp(wrist.position, middle.position, 0.5f)
+                : wrist.position;
+            return true;
+        }
+
+        private Transform FindBone(OVRSkeleton skeleton, OVRSkeleton.BoneId boneId)
+        {
+            if (skeleton == null || skeleton.Bones == null || skeleton.Bones.Count == 0)
+                return null;
+            foreach (var bone in skeleton.Bones)
+            {
+                if (bone.Id == boneId)
+                    return bone.Transform;
+            }
+            return null;
         }
 
         private void UpdateTrackingStatus()
         {
-            // 更新左手状态（有手掌骨用手掌骨，否则用锚点也算“有位置”）
+            // 左手のトラッキング状態を更新（手のひらボーンがあれば使用し、なければアンカー位置を使用する）
             _leftTracking = false;
             if (leftOVRHand != null && leftOVRHand.IsTracked)
             {
                 if (_leftPalmBone == null)
                     _leftPalmBone = FindPalmBone(_leftSkeleton);
+                if (_leftMiddleBone == null)
+                    _leftMiddleBone = FindBone(_leftSkeleton, OVRSkeleton.BoneId.Hand_Middle1);
                 _leftTracking = _leftPalmBone != null || _leftHandAnchor != null;
             }
             else if (leftHandFallback != null || _leftHandAnchor != null)
@@ -124,12 +174,14 @@ namespace CPRSimulation
                 _leftTracking = true;
             }
 
-            // 更新右手状态
+            // 右手のトラッキング状態を更新
             _rightTracking = false;
             if (rightOVRHand != null && rightOVRHand.IsTracked)
             {
                 if (_rightPalmBone == null)
                     _rightPalmBone = FindPalmBone(_rightSkeleton);
+                if (_rightMiddleBone == null)
+                    _rightMiddleBone = FindBone(_rightSkeleton, OVRSkeleton.BoneId.Hand_Middle1);
                 _rightTracking = _rightPalmBone != null || _rightHandAnchor != null;
             }
             else if (rightHandFallback != null || _rightHandAnchor != null)
@@ -137,7 +189,7 @@ namespace CPRSimulation
                 _rightTracking = true;
             }
 
-            // 更新活动手位置
+            // 現在有効な手の位置を更新
             _activeHandPosition = GetActiveHandPosition();
         }
 
@@ -145,7 +197,7 @@ namespace CPRSimulation
         {
             if (pressDetector == null || pressDetector.useCollisionDetection) return;
 
-            // 传统模式：提供手掌Transform给检测器
+            // 従来モード：検出器に手のひらのTransformを渡す
             Transform palmTransform = GetActivePalmTransform();
             if (palmTransform != null)
             {
@@ -223,6 +275,8 @@ namespace CPRSimulation
 
         private Transform GetLeftPalmTransform()
         {
+            if (usePalmCenter && _leftPalmProxyValid && _leftTracking)
+                return _leftPalmProxy;
             if (_leftPalmBone != null && _leftTracking)
                 return _leftPalmBone;
             if (leftHandFallback != null) return leftHandFallback;
@@ -231,6 +285,8 @@ namespace CPRSimulation
 
         private Transform GetRightPalmTransform()
         {
+            if (usePalmCenter && _rightPalmProxyValid && _rightTracking)
+                return _rightPalmProxy;
             if (_rightPalmBone != null && _rightTracking)
                 return _rightPalmBone;
             if (rightHandFallback != null) return rightHandFallback;

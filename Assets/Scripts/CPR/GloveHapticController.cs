@@ -104,6 +104,11 @@ namespace CPRSimulation
         /// <summary>
         /// 直接按深度触发触觉（由 CPRTrainingController.OnCompressionDetected 直接调用，不依赖事件订阅）
         /// </summary>
+        public bool IsBoundTo(CPRPressDetector detector)
+        {
+            return _isBound && pressDetector != null && pressDetector == detector;
+        }
+
         public void TriggerByDepth(float depthCm)
         {
             if (depthCm <= 0f) depthCm = 3f;
@@ -116,6 +121,32 @@ namespace CPRSimulation
 
         private float minGoodDepthCm => pressDetector != null ? pressDetector.minGoodDepthCm : 5f;
         private float maxGoodDepthCm => pressDetector != null ? pressDetector.maxGoodDepthCm : 6f;
+
+        /// <summary>
+        /// AED 电击放电时的强力一次性震动反馈（由 AEDTrainingRuntime 调用）。
+        /// </summary>
+        public void TriggerShockFeedback(int intensity = 100, int durationMs = 120)
+        {
+            if (!BhapticsLibrary.IsBhapticsAvailable(false))
+            {
+                if (logHapticEvents)
+                    Debug.LogWarning("[GloveHaptic] bHaptics不可用 (shock)");
+                return;
+            }
+
+            intensity = Mathf.Clamp(intensity, 1, 100);
+            var shockMotors = new int[6];
+            for (int i = 0; i < 6; i++)
+            {
+                shockMotors[i] = intensity;
+            }
+
+            BhapticsLibrary.PlayMotors((int)PositionType.GloveL, shockMotors, durationMs);
+            BhapticsLibrary.PlayMotors((int)PositionType.GloveR, shockMotors, durationMs);
+
+            if (logHapticEvents)
+                Debug.Log("[GloveHaptic] ⚡ AED 电击震动反馈");
+        }
 
         /// <summary>
         /// 停止当前及后续所有震动反馈（用于训练结束或中途退出）
@@ -239,8 +270,8 @@ namespace CPRSimulation
         /// </summary>
         private void OnCompressionComplete(float depthCm, float rateBPM)
         {
-            var depthStatus = pressDetector.DepthStatus;
-            var rateStatus = pressDetector.RateStatus;
+            var depthStatus = GetDepthQuality(depthCm);
+            var rateStatus = GetRateQuality(rateBPM);
 
             switch (depthStatus)
             {
@@ -265,6 +296,23 @@ namespace CPRSimulation
         /// <summary>
         /// 根据深度计算震动强度
         /// </summary>
+        private DepthQuality GetDepthQuality(float depthCm)
+        {
+            if (depthCm < minGoodDepthCm) return DepthQuality.TooShallow;
+            if (depthCm > maxGoodDepthCm) return DepthQuality.TooDeep;
+            return DepthQuality.Good;
+        }
+
+        private RateQuality GetRateQuality(float rateBPM)
+        {
+            if (rateBPM <= 0.1f) return RateQuality.Good;
+            float minGoodRateBPM = pressDetector != null ? pressDetector.minGoodRateBPM : 100f;
+            float maxGoodRateBPM = pressDetector != null ? pressDetector.maxGoodRateBPM : 120f;
+            if (rateBPM < minGoodRateBPM) return RateQuality.TooSlow;
+            if (rateBPM > maxGoodRateBPM) return RateQuality.TooFast;
+            return RateQuality.Good;
+        }
+
         private int CalculateIntensityByDepth(float depthCm)
         {
             if (depthCm < pressDetector.minGoodDepthCm)

@@ -54,6 +54,23 @@ namespace CPRSimulation
                  "= 此高度时深度=0；完全压到胸面时深度= compressionApproachHeight*100 cm")]
         public float compressionApproachHeight = 0.12f;
 
+        [Tooltip("动态基准自校准：手一进入接触区即以当前手高为基准，之后向下压才算深度。" +
+                 "开启后不再依赖胸面检测球摆放是否精准（推荐）。")]
+        public bool useDynamicRestCalibration = true;
+
+        [Header("精度增强")]
+        [Tooltip("沿胸部按压轴(chestSurface.up)投影计算深度，抗患者/床体倾斜。关闭则退回世界Y轴。")]
+        public bool useChestAxis = true;
+
+        [Tooltip("开始一次按压的深度阈值(cm)。高于释放阈值形成滞回，防止抖动重复计数。")]
+        public float pressStartDepthCm = 2f;
+
+        [Tooltip("结束一次按压的深度阈值(cm)。低于此值视为完全回弹/释放。")]
+        public float releaseDepthCm = 1.5f;
+
+        [Tooltip("两次按压最小时间间隔(秒)，用于去抖，防止单次按压被拆成多次。0.2s≈最高300次/分。")]
+        public float minCompressionInterval = 0.2f;
+
         [Header("医学标准")]
         [Tooltip("最小标准深度(cm)")]
         public float minGoodDepthCm = 5f;
@@ -117,6 +134,8 @@ namespace CPRSimulation
         private BoxCollider _triggerCollider;
         private HandTrackingAdapter _distanceFallbackAdapter;
         private bool _usingDistanceFallback;
+        private Vector3 _dynamicRestPos;
+        private bool _hasDynamicRest;
 
         private void Start()
         {
@@ -136,6 +155,7 @@ namespace CPRSimulation
             // 加上 compressionApproachHeight 后：手距胸面 12cm 时深度=0，压到胸面时深度=12cm
             _restHeight = chestSurface.position.y + compressionApproachHeight;
             _smoothedPalmPos = Vector3.zero;
+            _hasDynamicRest = false;
             _isPressing = false;
             _currentDepthCm = 0f;
             _currentRateBPM = 0f;
@@ -211,10 +231,12 @@ namespace CPRSimulation
                         {
                             _usingDistanceFallback = false;
                             _handInContact = false;
-                            ProcessDepthChange(0f); // 会触发 EndCompression
+                            ProcessDepthChange(0f, 0f); // 会触发 EndCompression
                         }
                         else if (_isPressing)
                             EndCompression();
+
+                        ResetDynamicRest();
                     }
                 }
             }
@@ -279,6 +301,7 @@ namespace CPRSimulation
             {
                 _handInContact = false;
                 _currentContactHand = null;
+                ResetDynamicRest();
                 Debug.Log("[CPRPressDetector] 手部离开检测区域");
             }
         }
@@ -314,70 +337,103 @@ namespace CPRSimulation
 
         private void UpdateDepthFromCollision(Vector3 handPosition)
         {
-            // 平滑手掌位置
+            ComputeDepths(handPosition, out float smoothedDepthCm, out float rawDepthCm);
+            ProcessDepthChange(smoothedDepthCm, rawDepthCm);
+        }
+
+        /// <summary>
+        /// 深度を一元的に計算し、状態機械/UI用の「平滑化深度」（揺れを抑える）と、
+        /// 実測ピーク記録用の「生深度」（平滑化によるピーク低下を避ける）を同時に返す。
+        /// 深度は押圧軸へ投影して計算する。useChestAxis の場合は chestSurface.up、そうでなければ世界Y軸を使う。
+        /// </summary>
+        private void ComputeDepths(Vector3 handPosition, out float smoothedDepthCm, out float rawDepthCm)
+        {
+            // 手のひら位置を平滑化（状態安定用のみ。ピーク値には使わない）
             if (_smoothedPalmPos == Vector3.zero)
                 _smoothedPalmPos = handPosition;
-            
+
             _smoothedPalmPos = Vector3.Lerp(
-                _smoothedPalmPos, 
-                handPosition, 
+                _smoothedPalmPos,
+                handPosition,
                 1f - Mathf.Exp(-Time.deltaTime / smoothing)
             );
 
-            // 计算深度（基于Y轴向下的距离）
-            float depthMeters = Mathf.Max(0f, _restHeight - _smoothedPalmPos.y);
-            float newDepthCm = depthMeters * 100f;
+            // 押圧軸：胸部表面の法線方向（上方向がリリース、下方向が押圧）。傾きに強い
+            Vector3 axis = (useChestAxis && chestSurface != null)
+                ? chestSurface.up.normalized
+                : Vector3.up;
 
-            ProcessDepthChange(newDepthCm);
+            if (useDynamicRestCalibration)
+            {
+                // 初回接触：現在の手位置を「リリース基準」とする
+                if (!_hasDynamicRest)
+                {
+                    _dynamicRestPos = _smoothedPalmPos;
+                    _hasDynamicRest = true;
+                }
+                // 手が押圧軸に沿って高い位置（完全リリース）へ戻ったら基準を引き上げ、毎回の押圧を0から計算する
+                else if (Vector3.Dot(_smoothedPalmPos - _dynamicRestPos, axis) > 0f)
+                {
+                    _dynamicRestPos = _smoothedPalmPos;
+                }
+
+                smoothedDepthCm = Mathf.Max(0f, Vector3.Dot(_dynamicRestPos - _smoothedPalmPos, axis)) * 100f;
+                rawDepthCm = Mathf.Max(0f, Vector3.Dot(_dynamicRestPos - handPosition, axis)) * 100f;
+            }
+            else
+            {
+                // 固定基準：胸面 + ホバー高さ。軸方向に沿って下向きへ投影する
+                Vector3 restPoint = chestSurface.position + axis * compressionApproachHeight;
+                smoothedDepthCm = Mathf.Max(0f, Vector3.Dot(restPoint - _smoothedPalmPos, axis)) * 100f;
+                rawDepthCm = Mathf.Max(0f, Vector3.Dot(restPoint - handPosition, axis)) * 100f;
+            }
+        }
+
+        private void ResetDynamicRest()
+        {
+            _hasDynamicRest = false;
+            _smoothedPalmPos = Vector3.zero;
         }
 
         private void UpdateDepthDetection()
         {
-            // 平滑手掌位置
-            if (_smoothedPalmPos == Vector3.zero)
-                _smoothedPalmPos = handPalm.position;
-            
-            _smoothedPalmPos = Vector3.Lerp(
-                _smoothedPalmPos, 
-                handPalm.position, 
-                1f - Mathf.Exp(-Time.deltaTime / smoothing)
-            );
-
-            // 计算深度（米转厘米）
-            float depthMeters = Mathf.Max(0f, _restHeight - _smoothedPalmPos.y);
-            float newDepthCm = depthMeters * 100f;
-
-            ProcessDepthChange(newDepthCm);
+            ComputeDepths(handPalm.position, out float smoothedDepthCm, out float rawDepthCm);
+            ProcessDepthChange(smoothedDepthCm, rawDepthCm);
         }
 
-        private void ProcessDepthChange(float newDepthCm)
+        /// <summary>
+        /// 双阈值滞回状态机：
+        /// 起按用 pressStartDepthCm、释放用 releaseDepthCm（&lt; 起按阈值），
+        /// 中间区不切换状态，杜绝在单一阈值附近抖动导致的重复计数/漏记。
+        /// 峰值用「原始深度」记录，避免平滑削峰。
+        /// </summary>
+        private void ProcessDepthChange(float smoothedDepthCm, float rawDepthCm)
         {
-            // 深度变化检测
-            if (!Mathf.Approximately(newDepthCm, _currentDepthCm))
+            // 对外暴露平滑深度（UI/触觉用，稳定不抖）
+            if (!Mathf.Approximately(smoothedDepthCm, _currentDepthCm))
             {
-                _currentDepthCm = newDepthCm;
+                _currentDepthCm = smoothedDepthCm;
                 OnDepthChanged?.Invoke(_currentDepthCm);
             }
 
-            // 按压状态检测
-            bool nowPressing = _currentDepthCm >= minDetectionDepthCm;
+            if (!_isPressing)
+            {
+                // 超过起按阈值才认定为一次按压开始
+                if (smoothedDepthCm >= pressStartDepthCm)
+                {
+                    _isPressing = true;
+                    _peakDepthThisPress = rawDepthCm;
+                    OnCompressionStart?.Invoke();
+                }
+            }
+            else
+            {
+                // 按压中：用原始深度记录真实峰值
+                _peakDepthThisPress = Mathf.Max(_peakDepthThisPress, rawDepthCm);
 
-            if (nowPressing && !_isPressing)
-            {
-                // 开始按压
-                _isPressing = true;
-                _peakDepthThisPress = _currentDepthCm;
-                OnCompressionStart?.Invoke();
-            }
-            else if (nowPressing && _isPressing)
-            {
-                // 按压中，记录峰值
-                _peakDepthThisPress = Mathf.Max(_peakDepthThisPress, _currentDepthCm);
-            }
-            else if (!nowPressing && _isPressing)
-            {
-                // 按压结束
-                EndCompression();
+                // 回弹到释放阈值以下才算一次结束
+                if (smoothedDepthCm <= releaseDepthCm)
+                    EndCompression();
             }
         }
 
@@ -393,6 +449,13 @@ namespace CPRSimulation
 
         private void RecordCompression()
         {
+            // 去抖：与上一次按压间隔过短视为同一次按压的抖动，不重复计数
+            if (_lastCompressionTime > 0f &&
+                (Time.time - _lastCompressionTime) < minCompressionInterval)
+            {
+                return;
+            }
+
             _compressionCount++;
 
             // 计算速率

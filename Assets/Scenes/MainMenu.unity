@@ -1383,7 +1383,7 @@ MonoBehaviour:
   quitButton: {fileID: 392811725}
   beginTrainingButton: {fileID: 1018016159}
   backFromTutorialButton: {fileID: 1434430499}
-  trainingSceneName: CPRTraining
+  trainingSceneName: Assets/demo/0.7.unity
   isVRMode: 1
 --- !u!114 &1195344548
 MonoBehaviour:

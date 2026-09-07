@@ -40,3 +40,20 @@ sysinfo.txt
 Backups/
 bug/
 surfer-blog/
+
+# Large binaries that must not enter git history (see Git LFS if they need versioning)
+Assets/*.zip
+Assets/*.zip.meta
+Assets/ThirdParty/
+Assets/ThirdParty.meta
+
+# Build output
+cpr_v0.7/
+*_BurstDebugInformation_DoNotShip/
+
+# Agent tooling
+.codex/
+
+# Editor verification screenshots (generated, unreferenced by any scene)
+Assets/Screenshots/
+Assets/Screenshots.meta

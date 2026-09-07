@@ -213,12 +213,12 @@ namespace CPRSimulation.Editor
             CreateText("StartHint", startPanel.transform, "準備完了", 36, 
                 new Vector2(0, 100), new Vector2(400, 60), Color.white);
             
-            var startScenarioBtn = CreateButton("StartScenarioButton", startPanel.transform, "シナリオ開始", 
+            var startScenarioBtn = CreateButton("StartScenarioButton", startPanel.transform, "CPR開始", 
                 new Vector2(0, 0), new Vector2(280, 60), new Color(0.9f, 0.6f, 0.2f));
             
-            var startCPRBtn = CreateButton("StartCPRButton", startPanel.transform, "CPR開始", 
+            var startCPRBtn = CreateButton("StartCPRButton", startPanel.transform, "AED開始", 
                 new Vector2(0, 0), new Vector2(280, 60), new Color(0.2f, 0.8f, 0.3f));
-            startCPRBtn.SetActive(false);
+            startCPRBtn.SetActive(true);
 
             var exitTrainingBtn = CreateButton("ExitTrainingButton", startPanel.transform, "終了", 
                 new Vector2(0, -80), new Vector2(220, 55), new Color(0.5f, 0.5f, 0.5f));

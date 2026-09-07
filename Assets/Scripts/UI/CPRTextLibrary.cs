@@ -167,9 +167,9 @@ public static class CPRTextLibrary
     public static string BtnStartTraining =>
         LanguageManager.Get("开始训练", "トレーニング開始", "Start Training");
 
-    /// <summary>「开始情景」按钮</summary>
+    /// <summary>「CPR开始」按钮</summary>
     public static string BtnStartScenario =>
-        LanguageManager.Get("开始情景", "シナリオ開始", "Start Scenario");
+        LanguageManager.Get("CPR开始", "CPR開始", "Start CPR");
 
     /// <summary>「准备就绪」状态提示</summary>
     public static string LabelReady =>

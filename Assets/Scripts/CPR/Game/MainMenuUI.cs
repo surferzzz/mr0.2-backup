@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using CPRSimulation;
 
 namespace CPRSimulation.Game
 {
@@ -13,19 +14,26 @@ namespace CPRSimulation.Game
         public GameObject mainMenuPanel;
         public GameObject tutorialPanel;
         public GameObject settingsPanel;
+        public GameObject trainingModePanel;
 
         [Header("主菜单按钮")]
         public Button startButton;
         public Button tutorialButton;
         public Button settingsButton;
         public Button quitButton;
+        public Button storyModeButton;
+        public Button cprModeButton;
+        public Button aedModeButton;
+        public Button quizModeButton;
+        public Button backFromTrainingModeButton;
+        public Button exitFromTrainingModeButton;
 
         [Header("教程面板按钮")]
         public Button beginTrainingButton;
         public Button backFromTutorialButton;
 
         [Header("场景设置")]
-        public string trainingSceneName = "CPRTraining";
+        public string trainingSceneName = "Assets/demo/0.7.unity";
 
         [Header("VR设置")]
         public bool isVRMode = true;
@@ -38,6 +46,15 @@ namespace CPRSimulation.Game
         private Text _quitBtnText;
         private Text _beginTrainingBtnText;
         private Text _backBtnText;
+        private Text _trainingModeTitleText;
+        private Text _storyModeBtnText;
+        private Text _cprModeBtnText;
+        private Text _aedModeBtnText;
+        private Text _quizModeBtnText;
+        private Text _backFromTrainingModeBtnText;
+        private Text _exitFromTrainingModeBtnText;
+
+        private const string FallbackTrainingScenePath = "Assets/demo/0.7.unity";
 
         // 语言选择按钮（运行时创建）
         private Button _langCNBtn;
@@ -77,6 +94,8 @@ namespace CPRSimulation.Game
 
         private void SetupButtons()
         {
+            EnsureTrainingModePanel();
+
             // 主菜单按钮
             if (startButton != null)
                 startButton.onClick.AddListener(OnStartClicked);
@@ -97,12 +116,36 @@ namespace CPRSimulation.Game
             if (backFromTutorialButton != null)
                 backFromTutorialButton.onClick.AddListener(ShowMainMenu);
 
+            if (storyModeButton != null)
+                storyModeButton.onClick.AddListener(() => OnTrainingModeClicked(CPRTrainingController.TrainingMode.Story));
+
+            if (cprModeButton != null)
+                cprModeButton.onClick.AddListener(() => OnTrainingModeClicked(CPRTrainingController.TrainingMode.CPR));
+
+            if (aedModeButton != null)
+                aedModeButton.onClick.AddListener(() => OnTrainingModeClicked(CPRTrainingController.TrainingMode.AED));
+
+            if (quizModeButton != null)
+                quizModeButton.onClick.AddListener(() => OnTrainingModeClicked(CPRTrainingController.TrainingMode.Quiz));
+
+            if (backFromTrainingModeButton != null)
+                backFromTrainingModeButton.onClick.AddListener(ShowMainMenu);
+
+            if (exitFromTrainingModeButton != null)
+                exitFromTrainingModeButton.onClick.AddListener(OnQuitClicked);
+
             // 缓存文字引用（从按钮子节点找 Text）
             _startBtnText       = GetBtnText(startButton);
             _tutorialBtnText    = GetBtnText(tutorialButton);
             _quitBtnText        = GetBtnText(quitButton);
             _beginTrainingBtnText = GetBtnText(beginTrainingButton);
             _backBtnText        = GetBtnText(backFromTutorialButton);
+            _storyModeBtnText = GetBtnText(storyModeButton);
+            _cprModeBtnText = GetBtnText(cprModeButton);
+            _aedModeBtnText = GetBtnText(aedModeButton);
+            _quizModeBtnText = GetBtnText(quizModeButton);
+            _backFromTrainingModeBtnText = GetBtnText(backFromTrainingModeButton);
+            _exitFromTrainingModeBtnText = GetBtnText(exitFromTrainingModeButton);
 
             // 从 mainMenuPanel 找 Title / SubTitle 文字
             if (mainMenuPanel != null)
@@ -123,6 +166,175 @@ namespace CPRSimulation.Game
         {
             if (btn == null) return null;
             return btn.GetComponentInChildren<Text>(true);
+        }
+
+        private void EnsureTrainingModePanel()
+        {
+            if (trainingModePanel == null)
+            {
+                Transform searchRoot = mainMenuPanel != null && mainMenuPanel.transform.parent != null
+                    ? mainMenuPanel.transform.parent
+                    : transform;
+                Transform existing = searchRoot.Find("TrainingModePanel");
+                if (existing != null)
+                    trainingModePanel = existing.gameObject;
+            }
+
+            if (trainingModePanel == null)
+            {
+                Transform parent = mainMenuPanel != null && mainMenuPanel.transform.parent != null
+                    ? mainMenuPanel.transform.parent
+                    : transform;
+
+                trainingModePanel = new GameObject("TrainingModePanel", typeof(RectTransform), typeof(Image));
+                trainingModePanel.transform.SetParent(parent, false);
+
+                RectTransform panelRect = trainingModePanel.GetComponent<RectTransform>();
+                panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+                panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+                panelRect.pivot = new Vector2(0.5f, 0.5f);
+                panelRect.anchoredPosition = Vector2.zero;
+                panelRect.sizeDelta = new Vector2(900f, 620f);
+
+                Image panelImage = trainingModePanel.GetComponent<Image>();
+                panelImage.color = new Color(0.02f, 0.04f, 0.05f, 0.82f);
+            }
+
+            Transform panel = trainingModePanel.transform;
+
+            _trainingModeTitleText = EnsureMenuText(
+                panel,
+                "TrainingModeTitle",
+                GetTrainingModeTitleLabel(),
+                new Vector2(0f, 235f),
+                new Vector2(760f, 70f),
+                42
+            );
+
+            if (storyModeButton == null)
+                storyModeButton = FindMenuButton("StoryModeButton") ?? CreateRuntimeModeCard("StoryModeButton", panel, new Vector2(-225f, 95f), CPRTrainingController.TrainingMode.Story);
+
+            if (cprModeButton == null)
+                cprModeButton = FindMenuButton("CPRModeButton") ?? CreateRuntimeModeCard("CPRModeButton", panel, new Vector2(225f, 95f), CPRTrainingController.TrainingMode.CPR);
+
+            if (aedModeButton == null)
+                aedModeButton = FindMenuButton("AEDModeButton") ?? CreateRuntimeModeCard("AEDModeButton", panel, new Vector2(-225f, -35f), CPRTrainingController.TrainingMode.AED);
+
+            if (quizModeButton == null)
+                quizModeButton = FindMenuButton("QuizModeButton") ?? CreateRuntimeModeCard("QuizModeButton", panel, new Vector2(225f, -35f), CPRTrainingController.TrainingMode.Quiz);
+
+            if (backFromTrainingModeButton == null)
+                backFromTrainingModeButton = FindMenuButton("BackFromTrainingModeButton") ?? CreateRuntimeMenuButton("BackFromTrainingModeButton", panel, new Vector2(-160f, -205f), new Color(0.18f, 0.22f, 0.26f, 0.95f), new Vector2(260f, 72f));
+
+            if (exitFromTrainingModeButton == null)
+                exitFromTrainingModeButton = FindMenuButton("ExitFromTrainingModeButton") ?? CreateRuntimeMenuButton("ExitFromTrainingModeButton", panel, new Vector2(160f, -205f), new Color(0.18f, 0.22f, 0.26f, 0.95f), new Vector2(260f, 72f));
+
+            trainingModePanel.SetActive(false);
+        }
+
+        private Text EnsureMenuText(Transform parent, string name, string text, Vector2 position, Vector2 size, int fontSize)
+        {
+            Transform existing = parent.Find(name);
+            GameObject textObject = existing != null
+                ? existing.gameObject
+                : new GameObject(name, typeof(RectTransform), typeof(Text));
+
+            textObject.transform.SetParent(parent, false);
+            RectTransform rect = textObject.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+
+            Text label = textObject.GetComponent<Text>();
+            label.text = text;
+            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.fontSize = fontSize;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.color = Color.white;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = Mathf.Max(16, fontSize - 12);
+            label.resizeTextMaxSize = fontSize;
+            return label;
+        }
+
+        private Button FindMenuButton(string name)
+        {
+            if (trainingModePanel == null)
+                return null;
+
+            Button[] buttons = trainingModePanel.GetComponentsInChildren<Button>(true);
+            foreach (Button button in buttons)
+            {
+                if (button != null && button.gameObject.name == name)
+                    return button;
+            }
+
+            return null;
+        }
+
+        private Button CreateRuntimeMenuButton(string name, Transform parent, Vector2 position, Color color)
+        {
+            return CreateRuntimeMenuButton(name, parent, position, color, new Vector2(400f, 116f));
+        }
+
+        private Button CreateRuntimeMenuButton(string name, Transform parent, Vector2 position, Color color, Vector2 size)
+        {
+            GameObject buttonObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button), typeof(Outline));
+            buttonObject.transform.SetParent(parent, false);
+
+            RectTransform rect = buttonObject.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+
+            Image image = buttonObject.GetComponent<Image>();
+            image.color = color;
+
+            Button button = buttonObject.GetComponent<Button>();
+            button.targetGraphic = image;
+
+            Outline outline = buttonObject.GetComponent<Outline>();
+            outline.effectColor = new Color(1f, 1f, 1f, 0.24f);
+            outline.effectDistance = new Vector2(2f, -2f);
+
+            GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(Text));
+            labelObject.transform.SetParent(buttonObject.transform, false);
+
+            RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
+
+            Text label = labelObject.GetComponent<Text>();
+            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.fontSize = 24;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.color = Color.white;
+            label.supportRichText = true;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 18;
+            label.resizeTextMaxSize = 26;
+            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            label.verticalOverflow = VerticalWrapMode.Overflow;
+            VRTrainingUIStyle.ApplyText(label, UIColorScheme.TextPrimary);
+            VRTrainingUIStyle.ApplyButton(button, color);
+            return button;
+        }
+
+        private Button CreateRuntimeModeCard(string name, Transform parent, Vector2 position, CPRTrainingController.TrainingMode mode)
+        {
+            TrainingModeCardDefinition definition = TrainingModeCatalog.Get(mode);
+            Button button = CreateRuntimeMenuButton(name, parent, position, definition.AccentColor);
+            var cardView = button.GetComponent<TrainingModeCardView>();
+            if (cardView == null)
+                cardView = button.gameObject.AddComponent<TrainingModeCardView>();
+            cardView.Apply(definition, 20, 18);
+            return button;
         }
 
         /// <summary>在主菜单面板顶部自动创建语言切换按钮行</summary>
@@ -265,15 +477,126 @@ namespace CPRSimulation.Game
             if (_titleText    != null) _titleText.text    = CPRTextLibrary.MainTitle;
             if (_subTitleText != null) _subTitleText.text = CPRTextLibrary.SubTitle;
 
-            if (_startBtnText         != null) _startBtnText.text         = CPRTextLibrary.BtnStartTraining;
+            if (_startBtnText         != null) _startBtnText.text         = GetTrainingModeEntryLabel();
             if (_tutorialBtnText      != null) _tutorialBtnText.text      = CPRTextLibrary.BtnTutorial;
             if (_quitBtnText          != null) _quitBtnText.text          = CPRTextLibrary.BtnQuit;
-            if (_beginTrainingBtnText != null) _beginTrainingBtnText.text = CPRTextLibrary.BtnStartTraining;
+            if (_beginTrainingBtnText != null) _beginTrainingBtnText.text = GetTrainingModeEntryLabel();
             if (_backBtnText          != null) _backBtnText.text          = CPRTextLibrary.BtnBack;
+            if (_trainingModeTitleText != null) _trainingModeTitleText.text = GetTrainingModeTitleLabel();
+            ApplyModeCard(storyModeButton, _storyModeBtnText, CPRTrainingController.TrainingMode.Story);
+            ApplyModeCard(cprModeButton, _cprModeBtnText, CPRTrainingController.TrainingMode.CPR);
+            ApplyModeCard(aedModeButton, _aedModeBtnText, CPRTrainingController.TrainingMode.AED);
+            ApplyModeCard(quizModeButton, _quizModeBtnText, CPRTrainingController.TrainingMode.Quiz);
+            if (_backFromTrainingModeBtnText != null) _backFromTrainingModeBtnText.text = GetBackButtonLabel();
+            if (_exitFromTrainingModeBtnText != null) _exitFromTrainingModeBtnText.text = GetExitButtonLabel();
 
             UpdateLangButtonHighlight();
 
             Debug.Log($"[MainMenuUI] UI文字已刷新 → {LanguageManager.Instance?.CurrentLanguage}");
+        }
+
+        private void ApplyModeCard(Button button, Text text, CPRTrainingController.TrainingMode mode)
+        {
+            TrainingModeCardDefinition definition = TrainingModeCatalog.Get(mode);
+            if (button != null)
+            {
+                var cardView = button.GetComponent<TrainingModeCardView>();
+                if (cardView == null)
+                    cardView = button.gameObject.AddComponent<TrainingModeCardView>();
+                cardView.Apply(definition, 20, 18);
+                text = cardView.Label ?? text;
+            }
+
+            SetModeCardText(text, definition.BuildRichLabel(20, 18));
+        }
+
+        private string GetTrainingModeEntryLabel()
+        {
+            return TrainingModeCatalog.EntryLabel;
+        }
+
+        private string GetTrainingModeTitleLabel()
+        {
+            return TrainingModeCatalog.SelectionTitle;
+        }
+
+        private string GetStoryTrainingButtonLabel()
+        {
+            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.Story);
+        }
+
+        private string GetStoryModeCardLabel()
+        {
+            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.Story, 20, 18);
+        }
+
+        private string GetCPRModeCardLabel()
+        {
+            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.CPR, 20, 18);
+        }
+
+        private string GetAEDModeCardLabel()
+        {
+            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.AED, 20, 18);
+        }
+
+        private string GetQuizModeCardLabel()
+        {
+            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.Quiz, 20, 18);
+        }
+
+        private string BuildModeCardLabel(string icon, string title, string description, string difficulty, string duration)
+        {
+            return $"<b>{icon} {title}</b>\n<size=20>{description}</size>\n<size=18>{difficulty}  |  {duration}</size>";
+        }
+
+        private void SetModeCardText(Text text, string value)
+        {
+            if (text == null)
+                return;
+
+            text.supportRichText = true;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.fontSize = 24;
+            text.resizeTextForBestFit = true;
+            text.resizeTextMinSize = 14;
+            text.resizeTextMaxSize = 26;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.text = value;
+        }
+
+        private string GetCPRTrainingButtonLabel()
+        {
+            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.CPR);
+        }
+
+        private string GetAEDTrainingButtonLabel()
+        {
+            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.AED);
+        }
+
+        private string GetQuizButtonLabel()
+        {
+            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.Quiz);
+        }
+
+        private string GetBackButtonLabel()
+        {
+            return LanguageManager.Get(
+                "\u8fd4\u56de",
+                "\u623b\u308b",
+                "Back"
+            );
+        }
+
+        private string GetExitButtonLabel()
+        {
+            return LanguageManager.Get(
+                "\u9000\u51fa",
+                "\u7d42\u4e86",
+                "Exit"
+            );
         }
 
         public void ShowMainMenu()
@@ -281,11 +604,21 @@ namespace CPRSimulation.Game
             SetPanelActive(mainMenuPanel, true);
             SetPanelActive(tutorialPanel, false);
             SetPanelActive(settingsPanel, false);
+            SetPanelActive(trainingModePanel, false);
         }
 
-        private void OnStartClicked()    => LoadTrainingScene();
-        private void OnTutorialClicked() { SetPanelActive(mainMenuPanel, false); SetPanelActive(tutorialPanel, true); }
-        private void OnSettingsClicked() { SetPanelActive(mainMenuPanel, false); SetPanelActive(settingsPanel, true); }
+        private void ShowTrainingModePanel()
+        {
+            SetPanelActive(mainMenuPanel, false);
+            SetPanelActive(tutorialPanel, false);
+            SetPanelActive(settingsPanel, false);
+            SetPanelActive(trainingModePanel, true);
+            RefreshAllTexts();
+        }
+
+        private void OnStartClicked() => ShowTrainingModePanel();
+        private void OnTutorialClicked() { SetPanelActive(mainMenuPanel, false); SetPanelActive(tutorialPanel, true); SetPanelActive(trainingModePanel, false); }
+        private void OnSettingsClicked() { SetPanelActive(mainMenuPanel, false); SetPanelActive(settingsPanel, true); SetPanelActive(trainingModePanel, false); }
 
         private void OnQuitClicked()
         {
@@ -296,12 +629,42 @@ namespace CPRSimulation.Game
 #endif
         }
 
-        private void OnBeginTrainingClicked() => LoadTrainingScene();
+        private void OnBeginTrainingClicked() => ShowTrainingModePanel();
+
+        private void OnTrainingModeClicked(CPRTrainingController.TrainingMode mode)
+        {
+            CPRTrainingController.SetRequestedTrainingMode(mode);
+            LoadTrainingScene();
+        }
 
         private void LoadTrainingScene()
         {
+            string sceneToLoad = ResolveTrainingSceneName();
+            if (string.IsNullOrEmpty(sceneToLoad))
+            {
+                Debug.LogWarning("[MainMenuUI] No loadable training scene found.");
+                return;
+            }
+
             Debug.Log($"[MainMenuUI] 加载训练场景: {trainingSceneName}");
-            SceneManager.LoadScene(trainingSceneName);
+            SceneManager.LoadScene(sceneToLoad);
+        }
+
+        private string ResolveTrainingSceneName()
+        {
+            if (!string.IsNullOrEmpty(trainingSceneName) &&
+                Application.CanStreamedLevelBeLoaded(trainingSceneName))
+            {
+                return trainingSceneName;
+            }
+
+            if (Application.CanStreamedLevelBeLoaded(FallbackTrainingScenePath))
+                return FallbackTrainingScenePath;
+
+            if (Application.CanStreamedLevelBeLoaded("0.7"))
+                return "0.7";
+
+            return string.Empty;
         }
 
         private void SetPanelActive(GameObject panel, bool active)

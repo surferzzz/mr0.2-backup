@@ -108,8 +108,8 @@ namespace CPRSimulation.Editor
             // 创建开始面板
             var startPanel = CreatePanel("StartTrainingPanel", canvasObj.transform);
             startPanel.SetActive(false);
-            var startScenarioBtn = CreateButton("StartScenarioButton", startPanel.transform, "开始情景", new Vector2(0, 0));
-            var startCPRBtn = CreateButton("StartCPRButton", startPanel.transform, "开始CPR", new Vector2(0, 0));
+            var startScenarioBtn = CreateButton("StartScenarioButton", startPanel.transform, "CPR开始", new Vector2(0, 0));
+            var startCPRBtn = CreateButton("StartCPRButton", startPanel.transform, "AED开始", new Vector2(0, 0));
             startCPRBtn.SetActive(false);
 
             // 创建训练HUD

@@ -108,7 +108,7 @@ namespace CPRSimulation
             if (_characterController != null)
             {
                 // 加上重力
-                Vector3 gravity = lockYAxis ? Vector3.down * 9.8f * Time.deltaTime : Vector3.zero;
+                Vector3 gravity = lockYAxis ? Vector3.zero : Vector3.down * 9.8f * Time.deltaTime;
                 _characterController.Move(moveDirection * moveSpeed * Time.deltaTime + gravity);
             }
             else

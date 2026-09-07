@@ -3,33 +3,52 @@ using UnityEngine;
 namespace CPRSimulation
 {
     /// <summary>
-    /// 使 CPR 反馈 UI（Canvas 或 HUD 根物体）始终位于摄像头前方，随头显移动
-    /// 挂到 TrainingCanvas 或 TrainingHUDPanel 的父物体上，并确保 Canvas 为 World Space
+    /// 把 CPR 反馈 UI（World Space Canvas / HUD 根物体）固定在患者头部附近。
+    /// 位置完全不依赖相机（既不依赖朝向也不依赖位置）——因此无论用户怎么转头、走动，
+    /// UI 都稳定停在患者头旁，不会“围绕一个点旋转”。
+    /// 朝向可选择仅绕 Y 轴朝向用户（保持竖直、正对、可读），这只改朝向不改位置，不会产生绕点漂移。
+    /// 挂到 TrainingCanvas / HUD 根物体上，Canvas 需为 World Space。
     /// </summary>
     public class CPRHUDFollowCamera : MonoBehaviour
     {
-        [Header("跟随设置")]
-        [Tooltip("UI 与摄像头的距离（米），越小越近")]
-        public float distanceInFront = 0.75f;
-        [Tooltip("勾选时：UI 放在患者胸部附近（离人物近）；不勾选：UI 在摄像头前方固定距离")]
+        [Header("锚定")]
+        [Tooltip("勾选时：UI 固定在患者头部附近（推荐）；不勾选：UI 退化为摄像头前方")]
         public bool placeUINearPatient = true;
-        [Tooltip("仅「靠近患者」时有效：胸部参考点与摄像头之间的比例(0~1)，0=贴胸部 1=贴摄像头")]
-        [Range(0f, 1f)] public float patientToCameraBlend = 0.4f;
-        [Tooltip("始终面向摄像头（可读性更好）")]
+        [Tooltip("锚点（一般为患者头部骨骼）。留空则自动从场景查找患者头部，再退回胸部检测点。")]
+        public Transform anchorOverride;
+        [Tooltip("UI 相对锚点（头部）的抬高高度（米）")]
+        public float heightAboveAnchor = 0.25f;
+        [Tooltip("UI 相对锚点的额外水平偏移（患者本地左右/前后，米）。x=右,z=前。用于让面板偏到头部一侧。")]
+        public Vector3 localPlanarOffset = Vector3.zero;
+
+        [Header("朝向")]
+        [Tooltip("仅绕 Y 轴朝向用户（可读性更好）。关闭则保持锚点朝向。")]
         public bool faceCamera = true;
-        [Tooltip("仅当此物体激活时跟随（例如仅 CPR 阶段）")]
+
+        [Header("其它")]
+        [Tooltip("不靠近患者时：UI 与摄像头的水平距离（米）")]
+        public float distanceInFront = 0.75f;
+        [Tooltip("仅当此物体激活时更新（例如仅 CPR 阶段）")]
         public bool onlyWhenActive = true;
+        [Tooltip("位置平滑时间常数（秒）。0=瞬间到位。患者基本静止，可保持较小值。")]
+        [Range(0f, 0.5f)] public float followSmoothing = 0.08f;
 
         [Header("地面以上")]
         [Tooltip("地面高度（世界坐标 Y），用于限制 UI 不沉入地下")]
         public float groundLevel = 0f;
-        [Tooltip("UI 最低高度 = groundLevel + 此值（米），弯腰时 UI 不会低于此高度")]
+        [Tooltip("UI 最低高度 = groundLevel + 此值（米）")]
         public float minHeightAboveGround = 0.8f;
+
+        // —— 以下为已废弃字段，仅保留以兼容旧序列化数据 ——
+        [HideInInspector] public float patientToCameraBlend = 0.4f;
+        [HideInInspector] public float chestHeightOffset = 0.5f;
+        [HideInInspector] public float distanceFromPatient = 0.45f;
 
         private Transform _cameraTransform;
         private OVRCameraRig _cameraRig;
         private Canvas _canvas;
-        private Transform _patientChestRef;
+        private Transform _patientAnchor;
+        private bool _hasInitializedPosition;
 
         private void Start()
         {
@@ -54,37 +73,98 @@ namespace CPRSimulation
                 if (_canvas.worldCamera == null && Camera.main != null)
                     _canvas.worldCamera = Camera.main;
             }
+
+            ResolveAnchor();
+        }
+
+        private void ResolveAnchor()
+        {
+            if (anchorOverride != null)
+            {
+                _patientAnchor = anchorOverride;
+                return;
+            }
+
+            // 从胸部检测点回溯到患者根，再找头部骨骼；找不到则退回胸部检测点
             var detector = GameObject.Find("CPR_ChestDetector");
-            _patientChestRef = detector != null ? detector.transform : null;
+            if (detector != null)
+            {
+                Transform head = FindDeepByName(detector.transform.root, "Head");
+                _patientAnchor = head != null ? head : detector.transform;
+            }
+        }
+
+        private static Transform FindDeepByName(Transform parent, string nameContains)
+        {
+            foreach (Transform child in parent)
+            {
+                if (child.name.IndexOf(nameContains, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    return child;
+                var result = FindDeepByName(child, nameContains);
+                if (result != null) return result;
+            }
+            return null;
         }
 
         private void LateUpdate()
         {
-            if (_cameraTransform == null) return;
             if (onlyWhenActive && !gameObject.activeInHierarchy) return;
 
-            if (placeUINearPatient && _patientChestRef == null)
+            if (anchorOverride != null && _patientAnchor != anchorOverride)
+                _patientAnchor = anchorOverride;
+            if (placeUINearPatient && _patientAnchor == null)
+                ResolveAnchor();
+
+            Vector3 targetPos;
+
+            if (placeUINearPatient && _patientAnchor != null)
             {
-                var go = GameObject.Find("CPR_ChestDetector");
-                _patientChestRef = go != null ? go.transform : null;
+                // 纯世界定位：钉在头部锚点附近，不引用相机位置/朝向
+                targetPos = _patientAnchor.position + Vector3.up * heightAboveAnchor;
+                if (localPlanarOffset != Vector3.zero)
+                {
+                    targetPos += _patientAnchor.right * localPlanarOffset.x
+                               + _patientAnchor.forward * localPlanarOffset.z;
+                }
             }
-            Vector3 pos;
-            if (placeUINearPatient && _patientChestRef != null)
+            else if (_cameraTransform != null)
             {
-                Vector3 chestPos = _patientChestRef.position + Vector3.up * 0.15f;
-                Vector3 camPos = _cameraTransform.position + _cameraTransform.forward * distanceInFront;
-                pos = Vector3.Lerp(chestPos, camPos, patientToCameraBlend);
+                Vector3 fwd = _cameraTransform.forward;
+                fwd.y = 0f;
+                if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.forward;
+                fwd.Normalize();
+                targetPos = _cameraTransform.position + fwd * distanceInFront;
             }
             else
             {
-                pos = _cameraTransform.position + _cameraTransform.forward * distanceInFront;
+                return;
             }
+
             float minY = groundLevel + minHeightAboveGround;
-            if (pos.y < minY)
-                pos.y = minY;
-            transform.position = pos;
-            if (faceCamera)
-                transform.rotation = Quaternion.LookRotation(transform.position - _cameraTransform.position);
+            if (targetPos.y < minY)
+                targetPos.y = minY;
+
+            if (!_hasInitializedPosition || followSmoothing <= 0f)
+            {
+                transform.position = targetPos;
+                _hasInitializedPosition = true;
+            }
+            else
+            {
+                transform.position = Vector3.Lerp(
+                    transform.position,
+                    targetPos,
+                    1f - Mathf.Exp(-Time.deltaTime / followSmoothing));
+            }
+
+            if (faceCamera && _cameraTransform != null)
+            {
+                // 仅绕 Y 轴朝向用户，保持竖直可读；这只改朝向、不改位置，不会绕点漂移
+                Vector3 faceDir = transform.position - _cameraTransform.position;
+                faceDir.y = 0f;
+                if (faceDir.sqrMagnitude > 1e-4f)
+                    transform.rotation = Quaternion.LookRotation(faceDir.normalized, Vector3.up);
+            }
         }
     }
 }
