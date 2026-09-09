@@ -45,6 +45,10 @@ namespace VRFirstAid.UI
         private Material[] originalMaterials;
         private Renderer currentRenderer;
 
+        // 自动前进计时器的句柄。必须保存，否则换步时停不掉上一个，
+        // 手动点「下一步」会因为旧计时器到期而多前进一步。
+        private Coroutine _autoNextRoutine;
+
         // 事件
         public System.Action OnTutorialCompleted;
         public System.Action OnTutorialSkipped;
@@ -123,12 +127,23 @@ namespace VRFirstAid.UI
                 previousButton.interactable = currentStepIndex > 0;
             }
 
+            // 先停掉上一步遗留的自动前进计时器，再决定要不要开新的。
+            //
+            // 不停的话会漏掉一步：手动点「下一步」时，上一步的计时器还挂着，
+            // 它到期后又调一次 OnNextClicked，于是直接跳过一步；
+            // 而且每次手动点击都会多留一个孤儿计时器，越点越乱。
+            if (_autoNextRoutine != null)
+            {
+                StopCoroutine(_autoNextRoutine);
+                _autoNextRoutine = null;
+            }
+
             if (nextButton != null)
             {
                 // 如果步骤有持续时间，自动进入下一步
                 if (step.duration > 0)
                 {
-                    StartCoroutine(AutoNextStep(step.duration));
+                    _autoNextRoutine = StartCoroutine(AutoNextStep(step.duration));
                 }
             }
         }
@@ -209,6 +224,7 @@ namespace VRFirstAid.UI
         private IEnumerator AutoNextStep(float delay)
         {
             yield return new WaitForSeconds(delay);
+            _autoNextRoutine = null;   // 自己跑完了，句柄置空
             OnNextClicked();
         }
 
