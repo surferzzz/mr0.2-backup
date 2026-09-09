@@ -60,3 +60,7 @@ Assets/Screenshots.meta
 
 # Unity 临时编译产物
 TempAssembly.dll
+
+# UnitySkills 截图输出
+Assets/Screenshots/
+Assets/Screenshots.meta

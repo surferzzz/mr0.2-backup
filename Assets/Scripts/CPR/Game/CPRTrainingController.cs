@@ -1605,13 +1605,24 @@ namespace CPRSimulation.Game
                 content = legacy.text;
                 bestFit = legacy.resizeTextForBestFit;
 
-                // Destroy 要到帧末才真正移除，期间同物体上会同时存在两个 Graphic
-                // 而导致文字重影 —— 先 disable 让它立刻停止渲染。
+                // 必须 DestroyImmediate，不能用 Destroy。
+                // Graphic 带 [DisallowMultipleComponent]，Text 还在的时候
+                // AddComponent<TextMeshProUGUI>() 会被 Unity 拒绝并返回 null；
+                // 而 Destroy 要到帧末才真正移除，于是「加不上 TMP」+「Text 被删」
+                // 叠加成物体上一个文本组件都不剩。
+                // 这里是启动时的一次性组件替换，不在每帧路径上，可以用 Immediate。
                 legacy.enabled = false;
-                Destroy(legacy);
+                DestroyImmediate(legacy);
             }
 
             TMP_Text tmp = go.AddComponent<TextMeshProUGUI>();
+            if (tmp == null)
+            {
+                Debug.LogError($"[CPRTraining]「{go.name}」添加 TextMeshProUGUI 失败，" +
+                               "该物体上可能还有其他 Graphic 组件（Image / RawImage 等）");
+                return null;
+            }
+
             tmp.text = content;
             tmp.fontSize = fontSize;
             tmp.alignment = ToTmpAlignment(anchor);
@@ -4197,15 +4208,21 @@ namespace CPRSimulation.Game
         /// </summary>
         private TMP_Text SwapLegacyTextComponent(GameObject textObject)
         {
+            TMP_Text text = textObject.GetComponent<TMP_Text>();
+            if (text != null)
+                return text;
+
+            // 同 UpgradeToTmp：Graphic 带 [DisallowMultipleComponent]，
+            // 必须先把 Text 彻底移除（DestroyImmediate，不是帧末生效的 Destroy），
+            // 否则 AddComponent<TextMeshProUGUI>() 返回 null。
             Text legacy = textObject.GetComponent<Text>();
             if (legacy != null)
-                Destroy(legacy);
+            {
+                legacy.enabled = false;
+                DestroyImmediate(legacy);
+            }
 
-            TMP_Text text = textObject.GetComponent<TMP_Text>();
-            if (text == null)
-                text = textObject.AddComponent<TextMeshProUGUI>();
-
-            return text;
+            return textObject.AddComponent<TextMeshProUGUI>();
         }
 
         /// <summary>TextAnchor（legacy）到 TextAlignmentOptions（TMP）的映射。</summary>

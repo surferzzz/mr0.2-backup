@@ -19,8 +19,17 @@ namespace CPRSimulation
         private const string Root = "VRTrainingUI/Kenney/";
         private const string ButtonName = "button_rectangle_depth_gradient";
         private const string ButtonFlatName = "button_rectangle_depth_flat";
-        // 面板用带边框的圆角矩形：边框由精灵自带，省掉 Outline 组件的顶点开销
-        private const string PanelName = "button_rectangle_border";
+        // 面板用 button_round_flat 而不是 button_rectangle_border。
+        //
+        // 原因是量出来的：Kenney 所有 *rectangle* 精灵（192x64）的圆角弧高都只有
+        // 约 3px，九宫格拉伸时圆角保持 3px 不变，所以在几百像素的面板上和直角
+        // 肉眼无法区分 —— 之前换成 rectangle_border 其实没有产生可见效果。
+        // button_round_flat 是 64x64、圆角弧高 26px，拉伸后能看出真圆角。
+        private const string PanelName = "button_round_flat";
+
+        // 必须 >= 26（圆角弧高）才不会把圆角切掉，且 x2 < 64（精灵高度）。
+        // 取 28 留一点余量，中心还剩 8px 可拉伸。
+        private const float PanelBorder = 28f;
         private const string ClickClipPath = Root + "Sounds/tap-a";
 
         private static readonly Dictionary<string, Sprite> SpriteCache = new Dictionary<string, Sprite>();
@@ -69,10 +78,9 @@ namespace CPRSimulation
                 // 之前这里是 sprite = null，面板因此是硬直角矩形 —— 这是整套 UI
                 // 看起来「简陋」的主因。换成 Kenney 的九宫格圆角精灵，
                 // 边框由精灵自带，不再需要 Outline 组件。
-                // 精灵是 192x64，边框取 18px（与 ApplyDepthTrack 一致）：
-                // 上下 18+18=36 < 64，中间还留 28px 可拉伸，不会重叠。
                 image.sprite = GetSlicedSprite(Root + "PNG/Grey/Default/" + PanelName,
-                                               new Vector4(18f, 18f, 18f, 18f));
+                                               new Vector4(PanelBorder, PanelBorder,
+                                                           PanelBorder, PanelBorder));
                 image.type = image.sprite != null ? Image.Type.Sliced : Image.Type.Simple;
                 image.color = strong
                     ? new Color(0.025f, 0.055f, 0.070f, 0.88f)
