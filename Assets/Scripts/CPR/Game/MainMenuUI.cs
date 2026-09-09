@@ -520,35 +520,11 @@ namespace CPRSimulation.Game
             return TrainingModeCatalog.SelectionTitle;
         }
 
-        private string GetStoryTrainingButtonLabel()
-        {
-            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.Story);
-        }
 
-        private string GetStoryModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.Story, 20, 18);
-        }
 
-        private string GetCPRModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.CPR, 20, 18);
-        }
 
-        private string GetAEDModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.AED, 20, 18);
-        }
 
-        private string GetQuizModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(CPRTrainingController.TrainingMode.Quiz, 20, 18);
-        }
 
-        private string BuildModeCardLabel(string icon, string title, string description, string difficulty, string duration)
-        {
-            return $"<b>{icon} {title}</b>\n<size=20>{description}</size>\n<size=18>{difficulty}  |  {duration}</size>";
-        }
 
         private void SetModeCardText(Text text, string value)
         {
@@ -566,20 +542,8 @@ namespace CPRSimulation.Game
             text.text = value;
         }
 
-        private string GetCPRTrainingButtonLabel()
-        {
-            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.CPR);
-        }
 
-        private string GetAEDTrainingButtonLabel()
-        {
-            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.AED);
-        }
 
-        private string GetQuizButtonLabel()
-        {
-            return TrainingModeCatalog.GetTitle(CPRTrainingController.TrainingMode.Quiz);
-        }
 
         private string GetBackButtonLabel()
         {

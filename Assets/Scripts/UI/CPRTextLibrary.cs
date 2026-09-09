@@ -74,13 +74,21 @@ public static class CPRTextLibrary
         LanguageManager.Get("手部：请将手靠近胸部", "手: 胸に近づけてください", "Hand: Place hand on chest");
 
     // ---------- 按压实时提示（格式化） ----------
+    /// <summary>
+    /// 按压实时提示。这个方法在 CPRTrainingController.Update() 里每帧调用，
+    /// 所以不能用「三个实参都插值、Get 只留一个」的写法 ——
+    /// LanguageManager.Get 是普通方法，那样每帧会构建 3 个约 150 字符的长串、丢掉 2 个。
+    /// 先取格式串（纯字面量，不分配）再格式化一次。
+    /// </summary>
     public static string CPRProgress(int count, int target, float depth, float rate, bool handInContact)
     {
         string handStatus = handInContact ? HandStatus_Contact : HandStatus_NoContact;
-        return LanguageManager.Get(
-            $"按压次数: {count} / {target}\n实时深度: {depth:F1} cm    实时频率: {rate:F0} 次/分\n参考标准: 深度约 5–6 cm，频率 100–120 次/分\n{handStatus}",
-            $"圧迫回数: {count} / {target}\nリアルタイム深度: {depth:F1} cm    テンポ: {rate:F0} 回/分\n目標: 深さ 5–6 cm、テンポ 100–120 回/分\n{handStatus}",
-            $"Compressions: {count} / {target}\nDepth: {depth:F1} cm    Rate: {rate:F0}/min\nTarget: Depth 5–6 cm, Rate 100–120/min\n{handStatus}");
+        return string.Format(
+            LanguageManager.Get(
+                "按压次数: {0} / {1}\n实时深度: {2:F1} cm    实时频率: {3:F0} 次/分\n参考标准: 深度约 5–6 cm，频率 100–120 次/分\n{4}",
+                "圧迫回数: {0} / {1}\nリアルタイム深度: {2:F1} cm    テンポ: {3:F0} 回/分\n目標: 深さ 5–6 cm、テンポ 100–120 回/分\n{4}",
+                "Compressions: {0} / {1}\nDepth: {2:F1} cm    Rate: {3:F0}/min\nTarget: Depth 5–6 cm, Rate 100–120/min\n{4}"),
+            count, target, depth, rate, handStatus);
     }
 
     public static string CPRAbortProgress(int count, int target, float depth, float rate)

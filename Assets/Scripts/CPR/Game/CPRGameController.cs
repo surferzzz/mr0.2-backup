@@ -171,6 +171,10 @@ namespace CPRSimulation.Game
             // 触发倒地
             if (fallController != null)
             {
+                // 先减再加：OnStartTraining 接在按钮点击上、可以被再次触发，
+                // 而退订写在 OnPatientFallen 里（倒地完成才执行）。倒地前重复进入
+                // 就会累积处理器，导致 StartCPRPhase 被 Invoke 多次。
+                fallController.OnFallComplete -= OnPatientFallen;
                 fallController.OnFallComplete += OnPatientFallen;
                 fallController.TriggerFall();
                 Debug.Log("[CPRGame] 患者开始倒地动画！");

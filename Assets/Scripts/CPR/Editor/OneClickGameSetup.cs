@@ -277,8 +277,10 @@ namespace CPRSimulation.Editor
             controller.restartButton = restartBtn.GetComponent<Button>();
             controller.exitButton = exitBtn.GetComponent<Button>();
             controller.exitTrainingButton = exitTrainingBtn.GetComponent<Button>();
-            controller.phaseText = phaseText.GetComponent<Text>();
-            controller.instructionText = instructionText.GetComponent<Text>();
+            // phaseText / instructionText 不在这里接线了：controller 里这两个字段
+            // 已经是 TMP_Text，而向导建的是 legacy Text。物体名是 "PhaseText" /
+            // "InstructionText"，controller 启动时会按名字找到并就地升级成 TMP
+            // （见 ResolveAndUpgradeText），所以这里留空反而是正确的。
             controller.pressDetector = detector;
             controller.hapticController = haptic;
 

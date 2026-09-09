@@ -57,3 +57,6 @@ cpr_v0.7/
 # Editor verification screenshots (generated, unreferenced by any scene)
 Assets/Screenshots/
 Assets/Screenshots.meta
+
+# Unity 临时编译产物
+TempAssembly.dll

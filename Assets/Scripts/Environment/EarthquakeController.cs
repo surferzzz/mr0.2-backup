@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using UnityEngine;
+using CPRSimulation;   // ProceduralAudio
 
 /// <summary>
 /// Earthquake simulation for the training scene.
@@ -37,6 +39,20 @@ public class EarthquakeController : MonoBehaviour
     public AudioSource rumbleLoop;
     public AudioSource hitSfx;
     public bool generateProceduralRumble = true;
+
+    [Header("自动绑定")]
+    [Tooltip("Play() 时自动把房间里的松散道具填进 visualShakeTargets。" +
+             "震动是非破坏性的 —— Stop() 会还原原始位置与旋转。已手动配置则不覆盖。")]
+    public bool autoBindVisualTargets = true;
+
+    [Tooltip("房间根物体名，用来查找要震动的道具。")]
+    public string roomRootName = "Madduck_Hospital_Training_Room";
+
+    [Tooltip("未指定 dustFX 时自动生成一套扬尘粒子（不需要美术资源）。")]
+    public bool autoCreateDustFX = true;
+
+    [Tooltip("未指定 hitSfx 时用代码合成撞击/落屑声。")]
+    public bool autoCreateHitSfx = true;
 
     [Header("Debug")]
     public bool playOnStart = false;
@@ -114,6 +130,7 @@ public class EarthquakeController : MonoBehaviour
         _playing = false;
         RestoreCamera();
         RestoreVisualTargets();
+        RestoreRigidbodies();
 
         if (rumbleLoop != null)
         {
@@ -202,7 +219,9 @@ public class EarthquakeController : MonoBehaviour
 
         if (hitSfx != null && hitSfx.clip != null)
         {
-            hitSfx.PlayOneShot(hitSfx.clip);
+            // 每 impulseInterval 都是同一声闷响会很单调，随机音高拉开差异
+            hitSfx.pitch = Random.Range(0.82f, 1.22f);
+            hitSfx.PlayOneShot(hitSfx.clip, Mathf.Lerp(0.45f, 1f, intensity));
         }
     }
 
@@ -219,6 +238,174 @@ public class EarthquakeController : MonoBehaviour
         else if (targetCamera == null && Camera.main != null)
         {
             targetCamera = Camera.main.transform;
+        }
+
+        AutoBindVisualShakeTargets();
+        EnsureDustFX();
+        EnsureHitSfx();
+    }
+
+    // 结构件不该跟着晃：墙、地、天花板、门、装饰条、灯、标识、地垫、边界。
+    // 用排除法而不是白名单，这样房间以后加了新道具也会自动跟着震。
+    private static readonly string[] StructuralNameParts =
+    {
+        "Floor", "Wall", "Ceiling", "Trim", "Entrance", "Door",
+        "Mat", "Backplate", "Seal", "Boundary", "Light", "Sign", "Frame"
+    };
+
+    private void AutoBindVisualShakeTargets()
+    {
+        if (!autoBindVisualTargets)
+            return;
+
+        // 已经手动配置过就不覆盖
+        if (visualShakeTargets != null && visualShakeTargets.Length > 0)
+            return;
+
+        GameObject room = string.IsNullOrWhiteSpace(roomRootName) ? null : GameObject.Find(roomRootName);
+        if (room == null)
+        {
+            Debug.LogWarning($"[Earthquake] 未找到房间根物体「{roomRootName}」，道具震动跳过");
+            return;
+        }
+
+        var props = new List<Transform>();
+        foreach (Transform child in room.transform)
+        {
+            if (IsStructural(child.name))
+                continue;
+
+            props.Add(child);
+        }
+
+        visualShakeTargets = props.ToArray();
+        Debug.Log($"[Earthquake] 自动绑定 {props.Count} 个道具参与震动：" +
+                  string.Join("、", props.ConvertAll(p => p.name)));
+    }
+
+    private static bool IsStructural(string objectName)
+    {
+        foreach (string part in StructuralNameParts)
+        {
+            if (objectName.IndexOf(part, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 代码生成扬尘粒子，不依赖任何美术资源。
+    /// 从天花板高度的一个薄盒里向下缓慢飘落，粒子数刻意压低以照顾 Quest 3。
+    /// </summary>
+    private void EnsureDustFX()
+    {
+        if (dustFX != null || !autoCreateDustFX)
+            return;
+
+        var host = new GameObject("EarthquakeDustFX");
+        host.transform.SetParent(transform, false);
+        host.transform.position = new Vector3(0f, 2.7f, 0.25f);   // 房间中心的天花板附近
+
+        var ps = host.AddComponent<ParticleSystem>();
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+        var main = ps.main;
+        main.loop = true;
+        main.playOnAwake = false;
+        main.maxParticles = 80;                     // Quest 3 上刻意压低
+        main.startLifetime = new ParticleSystem.MinMaxCurve(2.5f, 4.5f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.02f, 0.06f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.05f, 0.25f);
+        main.gravityModifier = 0.08f;               // 缓慢飘落而不是砸下来
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(0.72f, 0.68f, 0.60f, 0.30f),
+            new Color(0.60f, 0.56f, 0.50f, 0.16f));
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+        var emission = ps.emission;
+        emission.enabled = true;
+        emission.rateOverTime = 30f;
+
+        var shape = ps.shape;
+        shape.enabled = true;
+        shape.shapeType = ParticleSystemShapeType.Box;
+        shape.scale = new Vector3(7.6f, 0.4f, 6.2f);   // 略小于房间，避免穿墙
+
+        var sizeOverLifetime = ps.sizeOverLifetime;
+        sizeOverLifetime.enabled = true;
+        sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(
+            1f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0.35f));
+
+        var colorOverLifetime = ps.colorOverLifetime;
+        colorOverLifetime.enabled = true;
+        colorOverLifetime.color = new ParticleSystem.MinMaxGradient(
+            new Gradient
+            {
+                colorKeys = new[]
+                {
+                    new GradientColorKey(Color.white, 0f),
+                    new GradientColorKey(Color.white, 1f)
+                },
+                alphaKeys = new[]
+                {
+                    new GradientAlphaKey(0f, 0f),
+                    new GradientAlphaKey(1f, 0.2f),
+                    new GradientAlphaKey(0f, 1f)
+                }
+            });
+
+        var renderer = host.GetComponent<ParticleSystemRenderer>();
+        if (renderer != null)
+        {
+            renderer.renderMode = ParticleSystemRenderMode.Billboard;
+            renderer.material = CreateDustMaterial();
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+        }
+
+        dustFX = ps;
+        Debug.Log("[Earthquake] 已生成扬尘粒子（80 上限 / 30 每秒）");
+    }
+
+    private static Material CreateDustMaterial()
+    {
+        // Built-in RP 下按可用性依次退让，找不到就返回 null 让 Unity 用默认粒子材质
+        Shader shader = Shader.Find("Legacy Shaders/Particles/Alpha Blended")
+                        ?? Shader.Find("Particles/Standard Unlit")
+                        ?? Shader.Find("Sprites/Default");
+
+        if (shader == null)
+        {
+            Debug.LogWarning("[Earthquake] 找不到可用的粒子着色器，扬尘将使用默认材质");
+            return null;
+        }
+
+        return new Material(shader) { color = new Color(0.70f, 0.66f, 0.58f, 0.28f) };
+    }
+
+    /// <summary>
+    /// hitSfx 每 impulseInterval 播一次，与有没有刚体无关，
+    /// 所以单独接上它就能有周期性的落屑/撞击声。
+    /// </summary>
+    private void EnsureHitSfx()
+    {
+        if (!autoCreateHitSfx)
+            return;
+
+        if (hitSfx == null)
+        {
+            var host = new GameObject("EarthquakeHitSfx");
+            host.transform.SetParent(transform, false);
+            hitSfx = host.AddComponent<AudioSource>();
+            hitSfx.playOnAwake = false;
+            hitSfx.spatialBlend = 0f;   // 整个房间都在震，不做定位
+            hitSfx.volume = 0.5f;
+        }
+
+        if (hitSfx.clip == null)
+        {
+            // 低频闷响 + 慢衰减 ≈ 建材受力/落屑
+            hitSfx.clip = ProceduralAudio.CreateClick("EarthquakeDebris", 95f, 0.45f, 7f, 0.85f);
         }
     }
 
@@ -276,6 +463,34 @@ public class EarthquakeController : MonoBehaviour
                 _bodyBaseGravity[i] = rb.useGravity;
                 _bodyBaseKinematic[i] = rb.isKinematic;
             }
+        }
+    }
+
+    /// <summary>
+    /// _bodyBaseGravity / _bodyBaseKinematic 在 CacheBaseTransforms 里存了，
+    /// 但原来没有任何地方还原 —— 刚体一旦被 Play() 变成动态就永远保持动态，
+    /// 地震结束后仍会继续受力漂移。这里补上收尾。
+    /// 注意：位置不还原，掉落的物件会留在原地（符合"地震过后"的观感）。
+    /// </summary>
+    private void RestoreRigidbodies()
+    {
+        if (affectedBodies == null || _bodyBaseGravity == null || _bodyBaseKinematic == null)
+        {
+            return;
+        }
+
+        int count = Mathf.Min(affectedBodies.Length,
+                              Mathf.Min(_bodyBaseGravity.Length, _bodyBaseKinematic.Length));
+        for (int i = 0; i < count; i++)
+        {
+            Rigidbody rb = affectedBodies[i];
+            if (rb == null)
+            {
+                continue;
+            }
+
+            rb.useGravity = _bodyBaseGravity[i];
+            rb.isKinematic = _bodyBaseKinematic[i];
         }
     }
 

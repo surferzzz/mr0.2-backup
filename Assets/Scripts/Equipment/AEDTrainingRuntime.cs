@@ -161,17 +161,45 @@ namespace VRFirstAid.Equipment
         private bool wasRightPinch;
         private bool wasLeftPinch;
 
+        /// <summary>
+        /// 自启动入口。注意：RuntimeInitializeOnLoadMethod 只在「首个场景加载后」
+        /// 执行一次，之后的场景切换不会再触发。
+        ///
+        /// 原来的实现在这里直接判断「当前场景没有 CPRTrainingController 就 return」，
+        /// 而 Build Settings 的启动场景是 Scenes/MainMenu.unity，那里没有训练控制器 ——
+        /// 于是构建版里这个方法一次就放弃，AEDTrainingRuntime 永远不会被创建，
+        /// 整个 AED 训练模块不会初始化。
+        /// 编辑器里直接 Play 训练场景时守卫刚好通过，所以问题只在构建版暴露。
+        ///
+        /// 修法：把创建逻辑挂到 sceneLoaded 上，每次场景加载后都重试一次。
+        /// </summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
+        {
+            // 先减再加：静态事件订阅会跨场景存活，编辑器关闭 Domain Reload 时
+            // 还会跨 Play 会话存活，重复订阅会导致每次加载尝试创建多次。
+            SceneManager.sceneLoaded -= HandleSceneLoadedForBootstrap;
+            SceneManager.sceneLoaded += HandleSceneLoadedForBootstrap;
+
+            TryCreateRuntimeHost();
+        }
+
+        private static void HandleSceneLoadedForBootstrap(Scene scene, LoadSceneMode mode)
+        {
+            TryCreateRuntimeHost();
+        }
+
+        private static void TryCreateRuntimeHost()
         {
             if (FindObjectOfType<AEDTrainingRuntime>() != null)
             {
                 return;
             }
 
+            // 没有训练控制器的场景（如主菜单）不需要 AED 宿主，静默跳过即可 ——
+            // 进入训练场景后 sceneLoaded 会再来一次。
             if (FindObjectOfType<CPRTrainingController>() == null)
             {
-                Debug.Log("[AEDTrainingRuntime] No CPRTrainingController detected in active scene - AED bootstrap skipped.");
                 return;
             }
 

@@ -2,7 +2,9 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using System.Collections;
+using TMPro;
 using CPRSimulation;
+using CPRSimulation.Knowledge;
 
 namespace CPRSimulation.Game
 {
@@ -47,8 +49,8 @@ namespace CPRSimulation.Game
         public Button hudExitButton;            // HUD 中途退出按钮
 
         [Header("UI\u6587\u672c")]
-        public Text phaseText;                  // 阶段提示文本
-        public Text instructionText;            // 指导文本
+        public TMP_Text phaseText;                  // 阶段提示文本
+        public TMP_Text instructionText;            // 指导文本
         public Text timerText;                  // 计时器
         [Tooltip("\u8bad\u7ec3\u5b8c\u6210\u9762\u677f\u4e0a\u7528\u4e8e\u663e\u793a\u7ed3\u679c\u548c\u8bc4\u4ef7\u7684 Text\uff0c\u4e0d\u586b\u5219\u81ea\u52a8\u4f7f\u7528 completionPanel \u4e0b\u7684\u7b2c\u4e00\u4e2a Text")]
         public Text completionResultText;
@@ -177,13 +179,13 @@ namespace CPRSimulation.Game
         private const float FixedCprHudHeightAboveChest = 0.82f;
         private const float FixedCprHudDistanceTowardViewer = 0.38f;
         private bool _mergedCprHudBuilt;
-        private Text _mergedCprCoachTextRuntime;
-        private Text _mergedCprDepthValueRuntime;
-        private Text _mergedCprRateValueRuntime;
-        private Text _mergedCprCountValueRuntime;
-        private Text _mergedCprHandCueRuntime;
-        private Text _mergedCprMetronomeRuntime;
-        private Text _mergedCprQualityValueRuntime;
+        private TMP_Text _mergedCprCoachTextRuntime;
+        private TMP_Text _mergedCprDepthValueRuntime;
+        private TMP_Text _mergedCprRateValueRuntime;
+        private TMP_Text _mergedCprCountValueRuntime;
+        private TMP_Text _mergedCprHandCueRuntime;
+        private TMP_Text _mergedCprMetronomeRuntime;
+        private TMP_Text _mergedCprQualityValueRuntime;
         private RectTransform _mergedCprDepthFillRuntime;
         private RectTransform _mergedCprRateFillRuntime;
         private Image _mergedCprDepthFillImageRuntime;
@@ -323,9 +325,20 @@ namespace CPRSimulation.Game
         private Button _langCNBtn, _langJPBtn, _langENBtn;
         private GameObject _languageSelectPanel;
         private GameObject _knowledgeQuizPanel;
-        private Text _knowledgeQuizText;
+        private TMP_Text _knowledgeQuizText;
+        private KnowledgeQuizView _knowledgeQuizView;
+
+        // UpdateMergedCprHud 每帧都跑（CPR 进行中）。下面这几个缓存用来跳过
+        // 「数值没变就不重建字符串」—— 它们只在每次按压后变，约 2 次/秒，
+        // 而 Quest 是 72-90 帧/秒。初值故意取 NaN / -1，保证首帧一定刷新。
+        private float _lastQualityDepthPct = float.NaN;
+        private float _lastQualityRatePct = float.NaN;
+        private int _lastQualityStreak = -1;
+        private bool _lastQualityHadRate;
+        private int _lastCountValue = -1;
+        private int _lastCountTarget = -1;
         private GameObject _storyCallHelpPanel;
-        private Text _storyCallHelpText;
+        private TMP_Text _storyCallHelpText;
         private Button _storyCallHelpButton;
         private bool _storyCallHelpConfirmed;
 
@@ -461,8 +474,26 @@ namespace CPRSimulation.Game
         }
 
         /// <summary>语言切换时刷新整个训练界面文字（阶段、提示、按钮等）/summary>
+        /// <summary>
+        /// 让 HUD 文字缓存失效，下一帧强制重建。
+        /// 语言切换、重开训练等场景都需要，因为缓存键只看数值。
+        /// </summary>
+        private void InvalidateMergedHudTextCache()
+        {
+            _lastQualityDepthPct = float.NaN;
+            _lastQualityRatePct = float.NaN;
+            _lastQualityStreak = -1;
+            _lastCountValue = -1;
+            _lastCountTarget = -1;
+        }
+
         private void RefreshAllTrainingUI()
         {
+            // 本方法是 OnLanguageChanged 的处理器。HUD 里「达标」和「进度」两行
+            // 用了跳过重建的缓存，而它们的缓存键只看数值 —— 切语言时数值没变，
+            // 文字就不会重建，会停在旧语言。所以任何一次显式刷新都先让缓存失效。
+            InvalidateMergedHudTextCache();
+
             // 1. 阶段名称
             if (phaseText != null)
                 phaseText.text = GetPhaseDisplayName(currentPhase);
@@ -492,7 +523,6 @@ namespace CPRSimulation.Game
                 foreach (var t in texts)
                 {
                     if (t.GetComponentInParent<Button>() != null) continue;
-                    if (t == instructionText) continue;
                     string n = t.gameObject.name.ToLower();
                     if (n.Contains("title") || n.Contains("status") || n.Contains("ready") || n.Contains("phase")
                         || n.Contains("label") || n.Contains("main") || n.Contains("header"))
@@ -507,8 +537,7 @@ namespace CPRSimulation.Game
                     foreach (var t in texts)
                     {
                         if (t.GetComponentInParent<Button>() != null) continue;
-                        if (t == instructionText) continue;
-                        t.text = GetTrainingModeSelectionTitleV2();
+                            t.text = GetTrainingModeSelectionTitleV2();
                         break;  // 只改第一个匹配的
                     }
                 }
@@ -521,7 +550,6 @@ namespace CPRSimulation.Game
                 foreach (var t in texts)
                 {
                     if (t.GetComponentInParent<Button>() != null) continue;
-                    if (t == instructionText) continue;
                     string n = t.gameObject.name.ToLower();
                     if (n.Contains("title") || n.Contains("welcome") || n.Contains("intro"))
                     {
@@ -562,41 +590,9 @@ namespace CPRSimulation.Game
             };
         }
 
-        private string GetTrainingModeSelectionTitle()
-        {
-            return LanguageManager.Get(
-                "请选择训练方式",
-                "トレーニング方式を選択してください",
-                "Choose a training mode"
-            );
-        }
 
-        private string GetTrainingModeSelectionInstruction()
-        {
-            return LanguageManager.Get(
-                "请选择 CPR 训练 或 AED 训练",
-                "CPRトレーニング または AEDトレーニング を選択してください",
-                "Choose CPR Training or AED Training"
-            );
-        }
 
-        private string GetCPRTrainingButtonLabel()
-        {
-            return LanguageManager.Get(
-                "CPR开始",
-                "CPR開始",
-                "Start CPR"
-            );
-        }
 
-        private string GetAEDTrainingButtonLabel()
-        {
-            return LanguageManager.Get(
-                "AED开始",
-                "AED開始",
-                "Start AED"
-            );
-        }
 
         private string GetTrainingModeSelectionTitleV2()
         {
@@ -617,30 +613,10 @@ namespace CPRSimulation.Game
             return TrainingModeCatalog.GetTitle(TrainingMode.Story);
         }
 
-        private string GetStoryModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(TrainingMode.Story);
-        }
 
-        private string GetCPRModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(TrainingMode.CPR);
-        }
 
-        private string GetAEDModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(TrainingMode.AED);
-        }
 
-        private string GetQuizModeCardLabel()
-        {
-            return TrainingModeCatalog.BuildCardLabel(TrainingMode.Quiz);
-        }
 
-        private string BuildModeCardLabel(string icon, string title, string description, string difficulty, string duration)
-        {
-            return $"<b>{icon} {title}</b>\n<size=22>{description}</size>\n<size=20>{difficulty}  |  {duration}</size>";
-        }
 
         private string GetCPRTrainingButtonLabelV2()
         {
@@ -893,8 +869,8 @@ namespace CPRSimulation.Game
             EnsureKnowledgeQuizPanel();
             if (_knowledgeQuizPanel != null)
                 _knowledgeQuizPanel.SetActive(true);
-            if (_knowledgeQuizText != null)
-                _knowledgeQuizText.text = GetQuizInstruction();
+
+            StartKnowledgeQuiz();
 
             RefreshAllTrainingUI();
             HideStartReadyLabels();
@@ -915,8 +891,11 @@ namespace CPRSimulation.Game
                 }
             }
 
+            // 原来是 920x240，只够放一行占位文字。做题要放题干+选项+解析+按钮，
+            // 尺寸由 KnowledgeQuizView 的布局常量给出，避免两处各写一个数字。
             RectTransform panelRect = _knowledgeQuizPanel.GetComponent<RectTransform>();
-            SetRuntimeRect(panelRect, new Vector2(0f, -30f), new Vector2(920f, 240f));
+            SetRuntimeRect(panelRect, new Vector2(0f, -30f),
+                           new Vector2(KnowledgeQuizView.PanelWidth, KnowledgeQuizView.PanelHeight));
 
             Image image = _knowledgeQuizPanel.GetComponent<Image>();
             if (image != null)
@@ -931,28 +910,75 @@ namespace CPRSimulation.Game
 
             VRTrainingUIStyle.ApplyPanel(_knowledgeQuizPanel, true);
 
-            if (_knowledgeQuizText == null)
-            {
-                GameObject textObject = FindChildGameObject(_knowledgeQuizPanel.transform, "KnowledgeQuizText");
-                if (textObject == null)
-                {
-                    textObject = new GameObject("KnowledgeQuizText", typeof(RectTransform), typeof(Text));
-                    textObject.transform.SetParent(_knowledgeQuizPanel.transform, false);
-                }
-
-                _knowledgeQuizText = textObject.GetComponent<Text>();
-                if (_knowledgeQuizText == null)
-                    _knowledgeQuizText = textObject.AddComponent<Text>();
-            }
-
-            ConfigureRuntimeText(
-                _knowledgeQuizText,
+            // 这里原来手写了一遍「找子物体 / 建 GameObject / GetComponent / AddComponent」，
+            // 和 EnsureRuntimeText 完全重复。直接调它，顺带一起迁到 TMP。
+            _knowledgeQuizText = EnsureRuntimeText(
+                _knowledgeQuizPanel.transform,
+                "KnowledgeQuizText",
                 Vector2.zero,
                 new Vector2(820f, 150f),
                 30,
                 TextAnchor.MiddleCenter,
                 UIColorScheme.TextPrimary
             );
+        }
+
+        /// <summary>
+        /// 开一轮知识测验。题库缺失或校验不通过时退回一行说明文字，
+        /// 而不是留一个空面板让人以为是卡住了。
+        /// </summary>
+        private void StartKnowledgeQuiz()
+        {
+            if (_knowledgeQuizPanel == null)
+                return;
+
+            if (_knowledgeQuizView == null)
+            {
+                _knowledgeQuizView = _knowledgeQuizPanel.GetComponent<KnowledgeQuizView>();
+                if (_knowledgeQuizView == null)
+                    _knowledgeQuizView = _knowledgeQuizPanel.AddComponent<KnowledgeQuizView>();
+            }
+
+            QuizBank bank = QuizBankLoader.Load();
+            if (bank == null)
+            {
+                _knowledgeQuizView.SetUIVisible(false);
+                ShowKnowledgeQuizMessage(GetQuizUnavailableText());
+                return;
+            }
+
+            // 题目 UI 起来了就把说明文字让开，两者都是面板的直接子物体
+            if (_knowledgeQuizText != null)
+                _knowledgeQuizText.gameObject.SetActive(false);
+
+            if (!_knowledgeQuizView.Begin(bank, OnKnowledgeQuizFinished))
+                ShowKnowledgeQuizMessage(GetQuizUnavailableText());
+        }
+
+        private void OnKnowledgeQuizFinished(QuizResult result)
+        {
+            string text = _knowledgeQuizView != null
+                ? _knowledgeQuizView.BuildResultText(result)
+                : $"{result.correct}/{result.total}";
+
+            ShowKnowledgeQuizMessage(text);
+        }
+
+        private void ShowKnowledgeQuizMessage(string message)
+        {
+            if (_knowledgeQuizText == null)
+                return;
+
+            _knowledgeQuizText.gameObject.SetActive(true);
+            _knowledgeQuizText.text = message;
+        }
+
+        private string GetQuizUnavailableText()
+        {
+            return LanguageManager.Get(
+                "题库未能载入。请检查 Resources/VRTrainingUI/Quiz/questions.json，Console 里有具体原因。",
+                "問題集を読み込めませんでした。Resources/VRTrainingUI/Quiz/questions.json を確認してください。詳細は Console に出ています。",
+                "Could not load the question bank. Check Resources/VRTrainingUI/Quiz/questions.json; the Console has details.");
         }
 
         private IEnumerator WaitForStoryCallHelpConfirmation()
@@ -1080,7 +1106,7 @@ namespace CPRSimulation.Game
             var texts = startTrainingPanel.GetComponentsInChildren<Text>(true);
             foreach (var text in texts)
             {
-                if (text == null || text.GetComponentInParent<Button>() != null || text == instructionText)
+                if (text == null || text.GetComponentInParent<Button>() != null)
                 {
                     continue;
                 }
@@ -1503,32 +1529,106 @@ namespace CPRSimulation.Game
             if (hudExitButton == null)
                 hudExitButton = FindButtonByName("HUDExitButton") ?? FindButtonByName("HudExitButton");
 
-            if (phaseText == null || instructionText == null)
-            {
-                var allTexts = FindObjectsOfType<Text>(true);
-                foreach (var t in allTexts)
-                {
-                    if (phaseText == null &&
-                        (t.text.Contains("CPR") ||
-                         t.text.Contains("\u8bad\u7ec3") ||
-                         t.text.Contains("\u30c8\u30ec\u30fc\u30cb\u30f3\u30b0")))
-                    {
-                        phaseText = t;
-                    }
+            // \u8fd9\u4e24\u4e2a\u5b57\u6bb5\u539f\u6765\u662f legacy Text\u3001\u5e76\u5728 7 \u4e2a\u573a\u666f\u91cc\u63a5\u4e86\u7ebf\u3002\u6539\u6210 TMP_Text \u540e
+            // Unity \u4f1a\u4e22\u6389\u90a3\u4e9b\u5e8f\u5217\u5316\u5f15\u7528\uff08\u7c7b\u578b\u4e0d\u5339\u914d\u65e0\u6cd5\u4fdd\u7559\uff09\uff0c\u6240\u4ee5\u8fd9\u91cc\u6309\u7269\u4f53\u540d
+            // \u91cd\u65b0\u89e3\u6790\uff0c\u5e76\u628a\u627e\u5230\u7684 legacy Text \u5c31\u5730\u5347\u7ea7\u6210 TMP\u3002
+            //
+            // \u987a\u5e26\u6362\u6389\u4e86\u539f\u6765\u7684\u515c\u5e95\u65b9\u5f0f\uff1a\u5b83\u662f\u6309\u6587\u6848\u5185\u5bb9\u5339\u914d\u7684\uff08\u641c\u542b
+            // "CPR" / "\u8bad\u7ec3" / "\u6309\u538b" \u7b49\u5b57\u6837\u7684\u6587\u672c\uff09\uff0c\u6362\u4e2a\u8bed\u8a00\u6216\u6539\u4e00\u53e5\u6587\u6848\u5c31\u4f1a\u5931\u7075\u3002
+            // \u7269\u4f53\u540d\u662f\u7a33\u5b9a\u7684\u3002
+            if (phaseText == null)
+                phaseText = ResolveAndUpgradeText("PhaseText");
 
-                    if (instructionText == null &&
-                        (t.text.Contains("\u6309\u538b") ||
-                         t.text.Contains("\u5f00\u59cb") ||
-                         t.text.Contains("\u958b\u59cb") ||
-                         t.text.Contains("\u6e96\u5099") ||
-                         t.text.Contains("\u5727\u8feb")))
+            if (instructionText == null)
+                instructionText = ResolveAndUpgradeText("InstructionText");
+
+            Debug.Log($"[CPRTraining] UI: startBtn={startScenarioButton != null}, exitBtn={exitButton != null}");
+        }
+
+        /// <summary>
+        /// 按物体名找到文本物体，并保证它带的是 TMP 组件。
+        /// GameObject.Find 找不到非激活物体，所以再兜一层全量搜索。
+        /// </summary>
+        private TMP_Text ResolveAndUpgradeText(string objectName)
+        {
+            GameObject go = GameObject.Find(objectName);
+
+            if (go == null)
+            {
+                foreach (TMP_Text t in FindObjectsOfType<TMP_Text>(true))
+                {
+                    if (t.gameObject.name == objectName)
+                        return t;   // 已经升级过了
+                }
+
+                foreach (Text t in FindObjectsOfType<Text>(true))
+                {
+                    if (t.gameObject.name == objectName)
                     {
-                        instructionText = t;
+                        go = t.gameObject;
+                        break;
                     }
                 }
             }
 
-            Debug.Log($"[CPRTraining] UI: startBtn={startScenarioButton != null}, exitBtn={exitButton != null}");
+            if (go == null)
+            {
+                Debug.LogWarning($"[CPRTraining] 找不到文本物体「{objectName}」，相关提示文字不会显示");
+                return null;
+            }
+
+            return UpgradeToTmp(go);
+        }
+
+        /// <summary>
+        /// 把物体上的 legacy Text 换成 TMP，并把场景里已经调好的排版参数带过去
+        /// （PhaseText 是 60 号黄色、InstructionText 是 42 号近白，丢了就得重新调）。
+        /// </summary>
+        private TMP_Text UpgradeToTmp(GameObject go)
+        {
+            TMP_Text existing = go.GetComponent<TMP_Text>();
+            if (existing != null)
+                return existing;
+
+            int fontSize = 32;
+            Color color = UIColorScheme.TextPrimary;
+            TextAnchor anchor = TextAnchor.MiddleCenter;
+            string content = string.Empty;
+            bool bestFit = false;
+
+            Text legacy = go.GetComponent<Text>();
+            if (legacy != null)
+            {
+                fontSize = legacy.fontSize;
+                color = legacy.color;
+                anchor = legacy.alignment;
+                content = legacy.text;
+                bestFit = legacy.resizeTextForBestFit;
+
+                // Destroy 要到帧末才真正移除，期间同物体上会同时存在两个 Graphic
+                // 而导致文字重影 —— 先 disable 让它立刻停止渲染。
+                legacy.enabled = false;
+                Destroy(legacy);
+            }
+
+            TMP_Text tmp = go.AddComponent<TextMeshProUGUI>();
+            tmp.text = content;
+            tmp.fontSize = fontSize;
+            tmp.alignment = ToTmpAlignment(anchor);
+            tmp.enableWordWrapping = true;
+            tmp.overflowMode = TextOverflowModes.Overflow;
+
+            if (bestFit)
+            {
+                tmp.enableAutoSizing = true;
+                tmp.fontSizeMin = Mathf.Max(10, fontSize - 8);
+                tmp.fontSizeMax = fontSize;
+            }
+
+            VRTrainingUIStyle.ApplyText(tmp, color, fontSize >= 30);
+
+            Debug.Log($"[CPRTraining] 「{go.name}」已从 legacy Text 升级为 TMP（{fontSize}号）");
+            return tmp;
         }
 
         private Button FindButtonByName(string name)
@@ -2856,11 +2956,14 @@ namespace CPRSimulation.Game
                     { targetText = t; break; }
                 }
             }
-            if (targetText == null) targetText = instructionText;
             if (_completionViewRuntime != null)
                 _completionViewRuntime.SetResult(result);
             else if (targetText != null)
                 targetText.text = result;
+            else if (instructionText != null)
+                // instructionText 现在是 TMP_Text，不能再赋给 Text 类型的 targetText，
+                // 所以把「退回指导文本」这一步单独写出来，行为不变
+                instructionText.text = result;
 
             // 按当前语言刷新完成界面的标题和按钮（与开始界面选的语言一致）
             if (completionPanel != null)
@@ -3408,6 +3511,72 @@ namespace CPRSimulation.Game
             };
         }
 
+        /// <summary>
+        /// 合并 CPR HUD 的一个元素在容器里占的位置、大小和字号。
+        /// </summary>
+        private readonly struct HudSlot
+        {
+            public readonly float X;
+            public readonly float Y;
+            public readonly float W;
+            public readonly float H;
+            public readonly int FontSize;
+
+            public HudSlot(float x, float y, float w, float h, int fontSize)
+            {
+                X = x; Y = y; W = w; H = h; FontSize = fontSize;
+            }
+
+            public Vector2 Pos => new Vector2(X, Y);
+            public Vector2 Size => new Vector2(W, H);
+        }
+
+        /// <summary>
+        /// 合并 CPR HUD 的布局表。
+        ///
+        /// 这些数字原来散在 13 处 EnsureRuntimeText / ConfigureRuntimeText 调用里，
+        /// 想整体上移、改行距、或者换一版排版就得逐个去找。集中到这里之后，
+        /// 三段式结构也变得能一眼看出来：
+        ///
+        ///   页头（标题/指导/教练提示）行距 ~80-100
+        ///   指标（深度、频率各自的 标题|数值 / 进度条 / 图例）行距 ~44-46
+        ///   页脚（质量、次数|节拍、手位）行距 ~32-38
+        ///
+        /// 坐标以容器中心为原点，y 向上为正。整宽元素 x=0；
+        /// 左右并排的两个元素用 ±x（如深度标题在左、深度数值在右）。
+        /// 进度条本身的 y 见 DepthTrackY / RateTrackY，宽度用
+        /// MergedCprDepthBarWidth / MergedCprRateBarWidth 两个既有常量。
+        /// </summary>
+        private static class HudLayout
+        {
+            //                                    x        y       w      h  font
+            // ---- 页头 ----
+            public static readonly HudSlot Title       = new HudSlot(     0f,    300f,   800f,   52f, 34);
+            public static readonly HudSlot Instruction = new HudSlot(     0f,    218f,   790f,   86f, 22);
+            public static readonly HudSlot CoachTip    = new HudSlot(     0f,    118f,   790f,   78f, 22);
+
+            // ---- 指标 ----
+            public static readonly HudSlot DepthTitle  = new HudSlot(  -250f,     38f,   220f,   32f, 20);
+            public static readonly HudSlot DepthValue  = new HudSlot(   205f,     38f,   360f,   32f, 20);
+            public static readonly HudSlot DepthLegend = new HudSlot(     0f,    -52f,   620f,   30f, 17);
+            public static readonly HudSlot RateTitle   = new HudSlot(  -250f,    -96f,   220f,   32f, 20);
+            public static readonly HudSlot RateValue   = new HudSlot(   205f,    -96f,   360f,   32f, 20);
+            public static readonly HudSlot RateLegend  = new HudSlot(     0f,   -186f,   650f,   30f, 17);
+
+            // ---- 页脚 ----
+            public static readonly HudSlot Quality     = new HudSlot(     0f,   -218f,   720f,   28f, 18);
+            public static readonly HudSlot Count       = new HudSlot(  -255f,   -252f,   320f,   38f, 22);
+            public static readonly HudSlot Metronome   = new HudSlot(   175f,   -252f,   420f,   38f, 22);
+            public static readonly HudSlot HandCue     = new HudSlot(     0f,   -290f,   760f,   32f, 19);
+
+            // ---- 容器与进度条 ----
+            public static readonly Vector2 ContainerPos = new Vector2(0f, 70f);
+            public static readonly Vector2 ContainerSize = new Vector2(920f, 620f);
+            public const float DepthTrackY = -8f;
+            public const float RateTrackY = -142f;
+            public const float TrackHeight = 30f;
+        }
+
         private void BuildMergedCprHudIfNeeded()
         {
             if (trainingHUDPanel == null)
@@ -3426,7 +3595,7 @@ namespace CPRSimulation.Game
             }
 
             var containerRt = container.GetComponent<RectTransform>();
-            SetRuntimeRect(containerRt, new Vector2(0f, 70f), new Vector2(920f, 620f));
+            SetRuntimeRect(containerRt, HudLayout.ContainerPos, HudLayout.ContainerSize);
             container.transform.SetAsFirstSibling();
 
             var containerImage = container.GetComponent<Image>();
@@ -3445,9 +3614,9 @@ namespace CPRSimulation.Game
             {
                 ConfigureRuntimeText(
                     phaseText,
-                    new Vector2(0f, 300f),
-                    new Vector2(800f, 52f),
-                    34,
+                    HudLayout.Title.Pos,
+                    HudLayout.Title.Size,
+                    HudLayout.Title.FontSize,
                     TextAnchor.MiddleCenter,
                     new Color(1f, 0.92f, 0.05f, 1f)
                 );
@@ -3458,9 +3627,9 @@ namespace CPRSimulation.Game
             {
                 ConfigureRuntimeText(
                     instructionText,
-                    new Vector2(0f, 218f),
-                    new Vector2(790f, 86f),
-                    22,
+                    HudLayout.Instruction.Pos,
+                    HudLayout.Instruction.Size,
+                    HudLayout.Instruction.FontSize,
                     TextAnchor.MiddleCenter,
                     Color.white
                 );
@@ -3469,19 +3638,19 @@ namespace CPRSimulation.Game
             _mergedCprCoachTextRuntime = EnsureRuntimeText(
                 parent,
                 "MergedCPRCoachText",
-                new Vector2(0f, 118f),
-                new Vector2(790f, 78f),
-                22,
+                HudLayout.CoachTip.Pos,
+                HudLayout.CoachTip.Size,
+                HudLayout.CoachTip.FontSize,
                 TextAnchor.MiddleCenter,
                 new Color(0.90f, 0.96f, 1f, 1f)
             );
 
-            Text depthTitle = EnsureRuntimeText(
+            TMP_Text depthTitle = EnsureRuntimeText(
                 parent,
                 "MergedCPRDepthTitle",
-                new Vector2(-250f, 38f),
-                new Vector2(220f, 32f),
-                20,
+                HudLayout.DepthTitle.Pos,
+                HudLayout.DepthTitle.Size,
+                HudLayout.DepthTitle.FontSize,
                 TextAnchor.MiddleLeft,
                 new Color(0.72f, 0.88f, 1f, 1f)
             );
@@ -3496,12 +3665,22 @@ namespace CPRSimulation.Game
                 track = new GameObject("DepthBarBg", typeof(RectTransform), typeof(Image));
             track.transform.SetParent(parent, false);
             var trackRt = track.GetComponent<RectTransform>();
-            SetRuntimeRect(trackRt, new Vector2(0f, -8f), new Vector2(MergedCprDepthBarWidth, 30f));
+            SetRuntimeRect(trackRt, new Vector2(0f, HudLayout.DepthTrackY), new Vector2(MergedCprDepthBarWidth, 30f));
 
             var trackImage = track.GetComponent<Image>();
             if (trackImage == null)
                 trackImage = track.AddComponent<Image>();
             VRTrainingUIStyle.ApplyDepthTrack(trackImage);
+
+            // 合格深度区间色带。区间与条上限都取自 pressDetector，
+            // 用的是和 UpdateMergedCprHud 完全相同的换算，保证色带和填充对得上。
+            {
+                float minGoodCm = pressDetector != null ? pressDetector.minGoodDepthCm : 5f;
+                float maxGoodCm = pressDetector != null ? pressDetector.maxGoodDepthCm : 6f;
+                float barMaxCm = Mathf.Max(MergedCprDepthBarMaxCm, maxGoodCm + 2f);
+                EnsureGoodZoneBand(track.transform, "DepthBarGoodZone", MergedCprDepthBarWidth,
+                                   minGoodCm / barMaxCm, maxGoodCm / barMaxCm);
+            }
 
             GameObject fill = FindChildGameObject(track.transform, "DepthBarFill");
             if (fill == null)
@@ -3522,12 +3701,12 @@ namespace CPRSimulation.Game
                 _mergedCprDepthFillImageRuntime = fill.AddComponent<Image>();
             VRTrainingUIStyle.ApplyDepthFill(_mergedCprDepthFillImageRuntime);
 
-            Text depthLegend = EnsureRuntimeText(
+            TMP_Text depthLegend = EnsureRuntimeText(
                 parent,
                 "MergedCPRDepthLegend",
-                new Vector2(0f, -52f),
-                new Vector2(620f, 30f),
-                17,
+                HudLayout.DepthLegend.Pos,
+                HudLayout.DepthLegend.Size,
+                HudLayout.DepthLegend.FontSize,
                 TextAnchor.MiddleCenter,
                 new Color(0.82f, 0.88f, 0.92f, 1f)
             );
@@ -3540,19 +3719,19 @@ namespace CPRSimulation.Game
             _mergedCprDepthValueRuntime = EnsureRuntimeText(
                 parent,
                 "MergedCPRDepthValue",
-                new Vector2(205f, 38f),
-                new Vector2(360f, 32f),
-                20,
+                HudLayout.DepthValue.Pos,
+                HudLayout.DepthValue.Size,
+                HudLayout.DepthValue.FontSize,
                 TextAnchor.MiddleRight,
                 Color.white
             );
 
-            Text rateTitle = EnsureRuntimeText(
+            TMP_Text rateTitle = EnsureRuntimeText(
                 parent,
                 "MergedCPRRateTitle",
-                new Vector2(-250f, -96f),
-                new Vector2(220f, 32f),
-                20,
+                HudLayout.RateTitle.Pos,
+                HudLayout.RateTitle.Size,
+                HudLayout.RateTitle.FontSize,
                 TextAnchor.MiddleLeft,
                 new Color(0.72f, 0.88f, 1f, 1f)
             );
@@ -3567,12 +3746,22 @@ namespace CPRSimulation.Game
                 rateTrack = new GameObject("RateBarBg", typeof(RectTransform), typeof(Image));
             rateTrack.transform.SetParent(parent, false);
             var rateTrackRt = rateTrack.GetComponent<RectTransform>();
-            SetRuntimeRect(rateTrackRt, new Vector2(0f, -142f), new Vector2(MergedCprRateBarWidth, 26f));
+            SetRuntimeRect(rateTrackRt, new Vector2(0f, HudLayout.RateTrackY), new Vector2(MergedCprRateBarWidth, 26f));
 
             var rateTrackImage = rateTrack.GetComponent<Image>();
             if (rateTrackImage == null)
                 rateTrackImage = rateTrack.AddComponent<Image>();
             VRTrainingUIStyle.ApplyDepthTrack(rateTrackImage);
+
+            // 合格频率区间色带（默认 100-120/min）。频率条用的是
+            // InverseLerp(60, 150)，这里沿用同一换算。
+            {
+                float minGoodBpm = pressDetector != null ? pressDetector.minGoodRateBPM : 100f;
+                float maxGoodBpm = pressDetector != null ? pressDetector.maxGoodRateBPM : 120f;
+                EnsureGoodZoneBand(rateTrack.transform, "RateBarGoodZone", MergedCprRateBarWidth,
+                                   Mathf.InverseLerp(MergedCprMinRateDisplay, MergedCprMaxRateDisplay, minGoodBpm),
+                                   Mathf.InverseLerp(MergedCprMinRateDisplay, MergedCprMaxRateDisplay, maxGoodBpm));
+            }
 
             GameObject rateFill = FindChildGameObject(rateTrack.transform, "RateBarFill");
             if (rateFill == null)
@@ -3593,12 +3782,12 @@ namespace CPRSimulation.Game
                 _mergedCprRateFillImageRuntime = rateFill.AddComponent<Image>();
             VRTrainingUIStyle.ApplyDepthFill(_mergedCprRateFillImageRuntime);
 
-            Text rateLegend = EnsureRuntimeText(
+            TMP_Text rateLegend = EnsureRuntimeText(
                 parent,
                 "MergedCPRRateLegend",
-                new Vector2(0f, -186f),
-                new Vector2(650f, 30f),
-                17,
+                HudLayout.RateLegend.Pos,
+                HudLayout.RateLegend.Size,
+                HudLayout.RateLegend.FontSize,
                 TextAnchor.MiddleCenter,
                 new Color(0.82f, 0.88f, 0.92f, 1f)
             );
@@ -3611,9 +3800,9 @@ namespace CPRSimulation.Game
             _mergedCprRateValueRuntime = EnsureRuntimeText(
                 parent,
                 "MergedCPRRateValue",
-                new Vector2(205f, -96f),
-                new Vector2(360f, 32f),
-                20,
+                HudLayout.RateValue.Pos,
+                HudLayout.RateValue.Size,
+                HudLayout.RateValue.FontSize,
                 TextAnchor.MiddleRight,
                 Color.white
             );
@@ -3621,9 +3810,9 @@ namespace CPRSimulation.Game
             _mergedCprQualityValueRuntime = EnsureRuntimeText(
                 parent,
                 "MergedCPRQualityValue",
-                new Vector2(0f, -218f),
-                new Vector2(720f, 28f),
-                18,
+                HudLayout.Quality.Pos,
+                HudLayout.Quality.Size,
+                HudLayout.Quality.FontSize,
                 TextAnchor.MiddleCenter,
                 UIColorScheme.TextPrimary
             );
@@ -3631,9 +3820,9 @@ namespace CPRSimulation.Game
             _mergedCprCountValueRuntime = EnsureRuntimeText(
                 parent,
                 "MergedCPRCountValue",
-                new Vector2(-255f, -252f),
-                new Vector2(320f, 38f),
-                22,
+                HudLayout.Count.Pos,
+                HudLayout.Count.Size,
+                HudLayout.Count.FontSize,
                 TextAnchor.MiddleLeft,
                 UIColorScheme.TextPrimary
             );
@@ -3641,9 +3830,9 @@ namespace CPRSimulation.Game
             _mergedCprMetronomeRuntime = EnsureRuntimeText(
                 parent,
                 "MergedCPRMetronome",
-                new Vector2(175f, -252f),
-                new Vector2(420f, 38f),
-                22,
+                HudLayout.Metronome.Pos,
+                HudLayout.Metronome.Size,
+                HudLayout.Metronome.FontSize,
                 TextAnchor.MiddleRight,
                 UIColorScheme.TextPrimary
             );
@@ -3651,9 +3840,9 @@ namespace CPRSimulation.Game
             _mergedCprHandCueRuntime = EnsureRuntimeText(
                 parent,
                 "MergedCPRHandCue",
-                new Vector2(0f, -290f),
-                new Vector2(760f, 32f),
-                19,
+                HudLayout.HandCue.Pos,
+                HudLayout.HandCue.Size,
+                HudLayout.HandCue.FontSize,
                 TextAnchor.MiddleCenter,
                 UIColorScheme.TextSecondary
             );
@@ -3672,7 +3861,13 @@ namespace CPRSimulation.Game
                 phaseText.text = GetMergedCprTitle();
 
             if (_mergedCprCoachTextRuntime != null)
+            {
                 _mergedCprCoachTextRuntime.text = GetMergedCprCoachTip();
+                // 回弹告警要看得出是告警，不能和常规提示一个颜色
+                _mergedCprCoachTextRuntime.color = IsRecoilWarningActive
+                    ? UIColorScheme.Warning
+                    : UIColorScheme.TextSecondary;
+            }
 
             if (_mergedCprDepthFillRuntime != null)
             {
@@ -3715,30 +3910,60 @@ namespace CPRSimulation.Game
                 float rateHitRate = _rateSamples > 0 ? CalculateHitPercent(_goodRateSamples, _rateSamples) : 0f;
                 bool strongStreak = _currentQualityStreak >= 5;
                 _mergedCprQualityValueRuntime.color = strongStreak ? UIColorScheme.Success : UIColorScheme.TextPrimary;
-                _mergedCprQualityValueRuntime.text = LanguageManager.Get(
-                    $"\u8fbe\u6807\uff1a\u6df1\u5ea6 {depthHitRate:F0}% / \u9891\u7387 {(_rateSamples > 0 ? rateHitRate.ToString("F0") + "%" : "--")}  \u8fde\u7eed {_currentQualityStreak}",
-                    $"\u5408\u683c\uff1a\u6df1\u3055 {depthHitRate:F0}% / \u30c6\u30f3\u30dd {(_rateSamples > 0 ? rateHitRate.ToString("F0") + "%" : "--")}  \u9023\u7d9a {_currentQualityStreak}",
-                    $"Hit: depth {depthHitRate:F0}% / rate {(_rateSamples > 0 ? rateHitRate.ToString("F0") + "%" : "--")}  Streak {_currentQualityStreak}"
-                );
+
+                // \u8fd9\u51e0\u4e2a\u6570\u5b57\u53ea\u5728\u6bcf\u6b21\u6309\u538b\u7ed3\u675f\u540e\u53d8\uff08\u7ea6 2 \u6b21/\u79d2\uff09\uff0c\u800c\u672c\u65b9\u6cd5\u6bcf\u5e27\u90fd\u8dd1\uff0c
+                // Quest \u4e0a\u662f 72-90 \u5e27/\u79d2 \u2014\u2014 \u6ca1\u53d8\u5c31\u4e0d\u91cd\u5efa\u5b57\u7b26\u4e32\u3002
+                bool hadRate = _rateSamples > 0;
+                if (!Mathf.Approximately(depthHitRate, _lastQualityDepthPct) ||
+                    !Mathf.Approximately(rateHitRate, _lastQualityRatePct) ||
+                    _currentQualityStreak != _lastQualityStreak ||
+                    hadRate != _lastQualityHadRate)
+                {
+                    _lastQualityDepthPct = depthHitRate;
+                    _lastQualityRatePct = rateHitRate;
+                    _lastQualityStreak = _currentQualityStreak;
+                    _lastQualityHadRate = hadRate;
+
+                    // LanguageManager.Get \u662f\u666e\u901a\u65b9\u6cd5\uff0c\u4e09\u4e2a\u5b9e\u53c2\u90fd\u4f1a\u5148\u6c42\u503c\u3002
+                    // \u539f\u6765\u8fd9\u91cc\u4e09\u79cd\u8bed\u8a00\u5404\u63d2\u503c\u4e00\u904d\u3001\u53ea\u7559\u4e00\u4e2a\uff0c\u53e6\u4e24\u4e2a\u76f4\u63a5\u4e22\u6389\u3002
+                    // \u6539\u6210\u5148\u53d6\u683c\u5f0f\u4e32\uff08\u7eaf\u5b57\u9762\u91cf\uff0c\u4e0d\u5206\u914d\uff09\u518d\u683c\u5f0f\u5316\u4e00\u6b21\u3002
+                    string ratePart = hadRate ? rateHitRate.ToString("F0") + "%" : "--";
+                    _mergedCprQualityValueRuntime.text = string.Format(
+                        LanguageManager.Get(
+                            "\u8fbe\u6807\uff1a\u6df1\u5ea6 {0:F0}% / \u9891\u7387 {1}  \u8fde\u7eed {2}",
+                            "\u5408\u683c\uff1a\u6df1\u3055 {0:F0}% / \u30c6\u30f3\u30dd {1}  \u9023\u7d9a {2}",
+                            "Hit: depth {0:F0}% / rate {1}  Streak {2}"),
+                        depthHitRate, ratePart, _currentQualityStreak);
+                }
             }
 
             if (_mergedCprCountValueRuntime != null)
             {
-                _mergedCprCountValueRuntime.text = LanguageManager.Get(
-                    $"\u8fdb\u5ea6\uff1a{compressionCount}/{targetCompressions}",
-                    $"\u9032\u6357\uff1a{compressionCount}/{targetCompressions}",
-                    $"Progress: {compressionCount}/{targetCompressions}"
-                );
+                // \u540c\u7406\uff1a\u6b21\u6570\u53ea\u5728\u6309\u538b\u65f6\u53d8
+                if (compressionCount != _lastCountValue || targetCompressions != _lastCountTarget)
+                {
+                    _lastCountValue = compressionCount;
+                    _lastCountTarget = targetCompressions;
+
+                    _mergedCprCountValueRuntime.text = string.Format(
+                        LanguageManager.Get(
+                            "\u8fdb\u5ea6\uff1a{0}/{1}",
+                            "\u9032\u6357\uff1a{0}/{1}",
+                            "Progress: {0}/{1}"),
+                        compressionCount, targetCompressions);
+                }
             }
 
             if (_mergedCprMetronomeRuntime != null)
             {
+                // \u8282\u62cd\u6807\u8bb0\u8ddf\u7740\u8282\u594f\u52a8\uff0c\u8df3\u8fc7\u68c0\u6d4b\u610f\u4e49\u4e0d\u5927\uff1b\u4f46\u4e09\u8bed\u63d2\u503c\u7684\u6d6a\u8d39\u7167\u6837\u8981\u53bb\u6389
                 string beatMarker = GetMergedCprBeatMarker();
-                _mergedCprMetronomeRuntime.text = LanguageManager.Get(
-                    $"\u8282\u62cd {beatMarker} 100-120/min",
-                    $"\u62cd\u5b50 {beatMarker} 100-120/min",
-                    $"Beat {beatMarker} 100-120/min"
-                );
+                _mergedCprMetronomeRuntime.text = string.Format(
+                    LanguageManager.Get(
+                        "\u8282\u62cd {0} 100-120/min",
+                        "\u62cd\u5b50 {0} 100-120/min",
+                        "Beat {0} 100-120/min"),
+                    beatMarker);
             }
 
             if (_mergedCprHandCueRuntime != null)
@@ -3757,8 +3982,27 @@ namespace CPRSimulation.Game
             );
         }
 
+        /// <summary>上一次按压回弹不足时，教练提示要让位给回弹告警。</summary>
+        private bool IsRecoilWarningActive =>
+            pressDetector != null && pressDetector.LastRecoilIncomplete;
+
         private string GetMergedCprCoachTip()
         {
+            // 回弹不足优先。下面那几条按次数推进的提示里本来就写着「让胸部回弹」，
+            // 但那只是固定台词，学员有没有真的回弹它并不知道。
+            // 检测器现在能测出来了，就该在真的没回弹时才喊，并说清差多少。
+            // LastRecoilIncomplete 会保持到下一次按压结束，所以这条提示会自然消失。
+            if (IsRecoilWarningActive)
+            {
+                // 同样避开三语各插值一遍：本方法在回弹告警期间每帧都会被调用
+                return string.Format(
+                    LanguageManager.Get(
+                        "回弹不足（胸部仍下压 {0:F1}cm）：压完把手完全松开，不要压着胸口。",
+                        "リコイル不足（胸が {0:F1}cm 沈んだまま）：圧迫後は手を完全に離し、体重を預けない。",
+                        "Incomplete recoil ({0:F1}cm still depressed): release fully after each compression; do not lean."),
+                    pressDetector.LastRecoilDeficitCm);
+            }
+
             if (compressionCount < 10)
             {
                 return LanguageManager.Get(
@@ -3921,21 +4165,92 @@ namespace CPRSimulation.Game
             return beatPhase < 0.18f ? "●" : "○";
         }
 
-        private Text EnsureRuntimeText(Transform parent, string name, Vector2 anchoredPosition, Vector2 size, int fontSize, TextAnchor alignment, Color color)
+        /// <summary>
+        /// runtime HUD 的文本统一出口，现在产出 TextMeshProUGUI。
+        ///
+        /// 迁到 TMP 的原因：legacy Text 是位图图集，按固定像素尺寸烘一次再缩放，
+        /// VR 距离下发虚；TMP 是 SDF，分辨率无关。
+        /// 前提是字体资源里必须有 CJK 字形 —— legacy Text 靠 OS 字体回退显示日文，
+        /// TMP 没有这个机制，所以先有 Bake CJK TMP Fonts 才能有这一步。
+        ///
+        /// 已存在的旧 legacy Text 子物体会被就地替换成 TMP（见 SwapLegacyTextComponent），
+        /// 这样重复进出训练不会留下混排。
+        /// </summary>
+        private TMP_Text EnsureRuntimeText(Transform parent, string name, Vector2 anchoredPosition, Vector2 size, int fontSize, TextAnchor alignment, Color color)
         {
             GameObject textObject = FindChildGameObject(parent, name);
             if (textObject == null)
             {
-                textObject = new GameObject(name, typeof(RectTransform), typeof(Text));
+                textObject = new GameObject(name, typeof(RectTransform));
                 textObject.transform.SetParent(parent, false);
             }
 
-            Text text = textObject.GetComponent<Text>();
-            if (text == null)
-                text = textObject.AddComponent<Text>();
+            TMP_Text text = SwapLegacyTextComponent(textObject);
 
             ConfigureRuntimeText(text, anchoredPosition, size, fontSize, alignment, color);
             return text;
+        }
+
+        /// <summary>
+        /// 拿到物体上的 TMP_Text；如果上面还挂着迁移前的 legacy Text，先删掉它。
+        /// 同一个物体上同时存在 Text 和 TextMeshProUGUI 会各画一遍，文字会重影。
+        /// </summary>
+        private TMP_Text SwapLegacyTextComponent(GameObject textObject)
+        {
+            Text legacy = textObject.GetComponent<Text>();
+            if (legacy != null)
+                Destroy(legacy);
+
+            TMP_Text text = textObject.GetComponent<TMP_Text>();
+            if (text == null)
+                text = textObject.AddComponent<TextMeshProUGUI>();
+
+            return text;
+        }
+
+        /// <summary>TextAnchor（legacy）到 TextAlignmentOptions（TMP）的映射。</summary>
+        private static TextAlignmentOptions ToTmpAlignment(TextAnchor anchor)
+        {
+            switch (anchor)
+            {
+                case TextAnchor.UpperLeft: return TextAlignmentOptions.TopLeft;
+                case TextAnchor.UpperCenter: return TextAlignmentOptions.Top;
+                case TextAnchor.UpperRight: return TextAlignmentOptions.TopRight;
+                case TextAnchor.MiddleLeft: return TextAlignmentOptions.Left;
+                case TextAnchor.MiddleCenter: return TextAlignmentOptions.Center;
+                case TextAnchor.MiddleRight: return TextAlignmentOptions.Right;
+                case TextAnchor.LowerLeft: return TextAlignmentOptions.BottomLeft;
+                case TextAnchor.LowerCenter: return TextAlignmentOptions.Bottom;
+                case TextAnchor.LowerRight: return TextAlignmentOptions.BottomRight;
+                default: return TextAlignmentOptions.Center;
+            }
+        }
+
+        /// <summary>
+        /// TMP 版。参数仍然收 TextAnchor，这样 21 个调用点一行都不用改。
+        /// </summary>
+        private void ConfigureRuntimeText(TMP_Text text, Vector2 anchoredPosition, Vector2 size, int fontSize, TextAnchor alignment, Color color)
+        {
+            if (text == null)
+                return;
+
+            SetRuntimeRect(text.transform as RectTransform, anchoredPosition, size);
+
+            text.fontSize = fontSize;
+            text.alignment = ToTmpAlignment(alignment);
+            text.color = color;
+            text.richText = true;
+
+            // legacy 的 resizeTextForBestFit / resizeTextMin|MaxSize 对应 TMP 的自动字号
+            text.enableAutoSizing = true;
+            text.fontSizeMin = Mathf.Max(10, fontSize - 8);
+            text.fontSizeMax = fontSize;
+
+            // legacy 的 horizontalOverflow=Wrap / verticalOverflow=Overflow
+            text.enableWordWrapping = true;
+            text.overflowMode = TextOverflowModes.Overflow;
+
+            VRTrainingUIStyle.ApplyText(text, color, fontSize >= 30);
         }
 
         private void ConfigureRuntimeText(Text text, Vector2 anchoredPosition, Vector2 size, int fontSize, TextAnchor alignment, Color color)
@@ -3969,6 +4284,48 @@ namespace CPRSimulation.Game
             rt.anchoredPosition = anchoredPosition;
             rt.sizeDelta = size;
             rt.localScale = Vector3.one;
+        }
+
+        /// <summary>
+        /// 在进度条底板上画出「合格区间」色带。
+        /// 之前学员只看到一个数字，并不知道 5cm 和 6cm 的边界落在条的哪个位置；
+        /// 有了色带就能直接看出自己在区间内还是外 —— 教学价值大于美观。
+        /// 用 SetAsFirstSibling 压到填充条下面，这样填充仍然画在色带之上。
+        /// </summary>
+        private void EnsureGoodZoneBand(Transform track, string bandName, float barWidth,
+                                        float normalizedStart, float normalizedEnd)
+        {
+            if (track == null)
+                return;
+
+            var band = FindChildGameObject(track, bandName);
+            if (band == null)
+            {
+                band = new GameObject(bandName, typeof(RectTransform), typeof(Image));
+                band.transform.SetParent(track, false);
+            }
+
+            float x0 = barWidth * Mathf.Clamp01(normalizedStart);
+            float x1 = barWidth * Mathf.Clamp01(normalizedEnd);
+
+            var rt = band.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0f, 0f);
+            rt.anchorMax = new Vector2(0f, 1f);
+            rt.pivot = new Vector2(0f, 0.5f);
+            rt.anchoredPosition = new Vector2(x0, 0f);
+            rt.sizeDelta = new Vector2(Mathf.Max(0f, x1 - x0), 0f);
+
+            var img = band.GetComponent<Image>();
+            if (img == null)
+                img = band.AddComponent<Image>();
+            img.sprite = null;
+            img.type = Image.Type.Simple;
+            // 半透明绿：填充条压上来之后两者仍然分得清
+            img.color = new Color(UIColorScheme.Success.r, UIColorScheme.Success.g,
+                                  UIColorScheme.Success.b, 0.22f);
+            img.raycastTarget = false;
+
+            band.transform.SetAsFirstSibling();
         }
 
         private GameObject FindChildGameObject(Transform parent, string childName)

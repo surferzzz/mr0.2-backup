@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -18,9 +19,44 @@ namespace CPRSimulation
         private const string Root = "VRTrainingUI/Kenney/";
         private const string ButtonName = "button_rectangle_depth_gradient";
         private const string ButtonFlatName = "button_rectangle_depth_flat";
+        // 面板用带边框的圆角矩形：边框由精灵自带，省掉 Outline 组件的顶点开销
+        private const string PanelName = "button_rectangle_border";
         private const string ClickClipPath = Root + "Sounds/tap-a";
 
         private static readonly Dictionary<string, Sprite> SpriteCache = new Dictionary<string, Sprite>();
+
+        // 由 Tools ▸ VR Training ▸ Bake CJK TMP Fonts 烘出。
+        // 主字体是 Noto Sans JP，其 fallbackFontAssetTable 里挂着
+        // Noto Sans SC，用来补 JP 没有的 201 个简体字形。
+        private const string FontAssetPath = "VRTrainingUI/Fonts/VRTrainingJP SDF";
+
+        private static TMP_FontAsset _cjkFont;
+        private static bool _cjkFontProbed;
+
+        /// <summary>
+        /// 烘好的 CJK 字体资源；没找到返回 null（调用方会退回 TMP 默认字体，
+        /// 那种情况下 CJK 会显示成豆腐块，所以这里要报错报得明确）。
+        /// </summary>
+        public static TMP_FontAsset CjkFont
+        {
+            get
+            {
+                if (!_cjkFontProbed)
+                {
+                    _cjkFontProbed = true;
+                    _cjkFont = Resources.Load<TMP_FontAsset>(FontAssetPath);
+                    if (_cjkFont == null)
+                    {
+                        Debug.LogError(
+                            $"[VRTrainingUIStyle] 找不到 TMP 字体资源 Resources/{FontAssetPath}。\n" +
+                            "跑一次 Tools ▸ VR Training ▸ Bake CJK TMP Fonts 生成它。\n" +
+                            "在那之前 TMP 会用默认字体（LiberationSans），日文和中文会显示成豆腐块。");
+                    }
+                }
+
+                return _cjkFont;
+            }
+        }
 
         public static void ApplyPanel(GameObject panel, bool strong = false)
         {
@@ -30,25 +66,47 @@ namespace CPRSimulation
             Image image = panel.GetComponent<Image>();
             if (image != null)
             {
-                image.sprite = null;
-                image.type = Image.Type.Simple;
+                // 之前这里是 sprite = null，面板因此是硬直角矩形 —— 这是整套 UI
+                // 看起来「简陋」的主因。换成 Kenney 的九宫格圆角精灵，
+                // 边框由精灵自带，不再需要 Outline 组件。
+                // 精灵是 192x64，边框取 18px（与 ApplyDepthTrack 一致）：
+                // 上下 18+18=36 < 64，中间还留 28px 可拉伸，不会重叠。
+                image.sprite = GetSlicedSprite(Root + "PNG/Grey/Default/" + PanelName,
+                                               new Vector4(18f, 18f, 18f, 18f));
+                image.type = image.sprite != null ? Image.Type.Sliced : Image.Type.Simple;
                 image.color = strong
-                    ? new Color(0.025f, 0.055f, 0.070f, 0.82f)
-                    : new Color(0.025f, 0.055f, 0.070f, 0.58f);
+                    ? new Color(0.025f, 0.055f, 0.070f, 0.88f)
+                    : new Color(0.025f, 0.055f, 0.070f, 0.66f);
                 image.raycastTarget = false;
             }
 
+            // Outline / Shadow 都是 BaseMeshEffect，会把每个图形的顶点数翻几倍。
+            // 圆角精灵已经自带边框和立体感，所以这里关掉而不是删除 ——
+            // 删除会破坏可能存在的旧序列化引用，关掉则随时可以回退。
             Outline outline = panel.GetComponent<Outline>();
-            if (outline == null)
-                outline = panel.AddComponent<Outline>();
-            outline.effectColor = strong
-                ? new Color(0.28f, 0.72f, 0.95f, 0.28f)
-                : new Color(0.65f, 0.86f, 1f, 0.12f);
-            outline.effectDistance = strong ? new Vector2(2f, -2f) : new Vector2(1f, -1f);
+            if (outline != null)
+                outline.enabled = false;
 
             Shadow shadow = GetDedicatedShadow(panel);
-            shadow.effectColor = new Color(0f, 0f, 0f, strong ? 0.46f : 0.30f);
-            shadow.effectDistance = strong ? new Vector2(0f, -6f) : new Vector2(0f, -3f);
+            if (image != null && image.sprite != null)
+            {
+                shadow.enabled = false;   // 精灵自带 depth，无需再叠投影
+            }
+            else
+            {
+                // 精灵加载失败时退回原来的观感，不至于变成一块纯色板
+                shadow.enabled = true;
+                shadow.effectColor = new Color(0f, 0f, 0f, strong ? 0.46f : 0.30f);
+                shadow.effectDistance = strong ? new Vector2(0f, -6f) : new Vector2(0f, -3f);
+                if (outline != null)
+                {
+                    outline.enabled = true;
+                    outline.effectColor = strong
+                        ? new Color(0.28f, 0.72f, 0.95f, 0.28f)
+                        : new Color(0.65f, 0.86f, 1f, 0.12f);
+                    outline.effectDistance = strong ? new Vector2(2f, -2f) : new Vector2(1f, -1f);
+                }
+            }
         }
 
         public static void ApplyButton(Button button, Color semanticColor)
@@ -109,6 +167,49 @@ namespace CPRSimulation
                     outline = text.gameObject.AddComponent<Outline>();
                 outline.effectColor = new Color(0f, 0f, 0f, 0.35f);
                 outline.effectDistance = new Vector2(1f, -1f);
+            }
+        }
+
+        /// <summary>
+        /// TMP 版。不是替换上面那个 legacy 重载 —— 全项目还有 12 处传 legacy Text
+        /// （MainMenuUI / TrainingResultPanelView / EarthquakeTrainingDirector 等），
+        /// 两个重载在分阶段迁移期间共存，C# 按类型自动分流。
+        /// </summary>
+        public static void ApplyText(TMP_Text text, Color color, bool title = false)
+        {
+            if (text == null)
+                return;
+
+            if (CjkFont != null)
+                text.font = CjkFont;
+
+            text.color = color;
+            text.richText = true;
+
+            // 标题的强调改用 TMP 原生字重。legacy 那边是靠 Outline+Shadow 描边，
+            // 但 Outline / Shadow 都是 BaseMeshEffect，对 TMP 不生效 ——
+            // TMP 自己生成网格，不走 BaseMeshEffect.ModifyMesh。
+            // TMP 真正的描边在材质上（outlineWidth），但那需要 fontMaterial
+            // 实例化，会打断合批；深色面板配浅色文字本来就不需要描边。
+            text.fontStyle = title ? FontStyles.Bold : FontStyles.Normal;
+
+            DisableLegacyMeshEffects(text.gameObject);
+        }
+
+        /// <summary>
+        /// 清掉迁移前留在同一个物体上的 Outline / Shadow。
+        /// 它们对 TMP 不起作用，但留着 enabled 仍会被 UI 系统遍历，
+        /// 而且会让人误以为描边是它们画的。
+        /// </summary>
+        private static void DisableLegacyMeshEffects(GameObject target)
+        {
+            if (target == null)
+                return;
+
+            foreach (BaseMeshEffect effect in target.GetComponents<BaseMeshEffect>())
+            {
+                if (effect != null)
+                    effect.enabled = false;
             }
         }
 

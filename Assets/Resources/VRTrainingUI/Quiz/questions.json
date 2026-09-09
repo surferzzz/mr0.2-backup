@@ -1,0 +1,75 @@
+{
+  "version": 1,
+
+  "_note_zh": "占位题库：内容仅用于跑通流程，不是真实医学题目。正式题目请由教员编写并把 reviewed 改为 true。",
+  "_note_ja": "プレースホルダー問題集：フロー確認用であり、実際の医学問題ではありません。",
+  "_note_en": "Placeholder bank: flow-testing content only, not real medical questions.",
+
+  "topics": [
+    {
+      "id": "sample",
+      "title": {
+        "zh": "示例主题（占位）",
+        "ja": "サンプル分野（プレースホルダー）",
+        "en": "Sample topic (placeholder)"
+      }
+    },
+    {
+      "id": "compression",
+      "title": {
+        "zh": "胸外按压",
+        "ja": "胸骨圧迫",
+        "en": "Chest compressions"
+      }
+    }
+  ],
+
+  "questions": [
+    {
+      "id": "sample_single",
+      "topic": "sample",
+      "type": "single",
+      "stem": {
+        "zh": "【示例题·非医学内容】下列哪一个选项被题库标记为正确答案？",
+        "ja": "【サンプル問題・医学内容ではありません】次のうち、正解として登録されている選択肢はどれですか？",
+        "en": "[Sample question - not medical content] Which option is registered as the correct answer?"
+      },
+      "options": [
+        { "zh": "选项 A", "ja": "選択肢 A", "en": "Option A" },
+        { "zh": "选项 B（这个是正确答案）", "ja": "選択肢 B（これが正解）", "en": "Option B (this is correct)" },
+        { "zh": "选项 C", "ja": "選択肢 C", "en": "Option C" },
+        { "zh": "选项 D", "ja": "選択肢 D", "en": "Option D" }
+      ],
+      "answer": 1,
+      "explanation": {
+        "zh": "这是解析文案的显示位置。答错时会展示这段文字，用来说明为什么正确答案是对的。",
+        "ja": "ここが解説の表示位置です。誤答時にこの文章が表示され、正解の理由を説明します。",
+        "en": "This is where the explanation appears. It is shown after a wrong answer to explain the correct choice."
+      },
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "sample_truefalse",
+      "topic": "sample",
+      "type": "truefalse",
+      "stem": {
+        "zh": "【示例判断题·非医学内容】这道题是占位内容，不是真实的医学考题。",
+        "ja": "【サンプル正誤問題・医学内容ではありません】この問題はプレースホルダーであり、実際の医学問題ではありません。",
+        "en": "[Sample true/false - not medical content] This question is placeholder content, not a real medical question."
+      },
+      "options": [
+        { "zh": "正确", "ja": "正しい", "en": "True" },
+        { "zh": "错误", "ja": "間違い", "en": "False" }
+      ],
+      "answer": 0,
+      "explanation": {
+        "zh": "判断题和单选题走同一条渲染路径 —— 判断题就是只有两个选项的单选题。",
+        "ja": "正誤問題と単一選択問題は同じ描画経路を通ります。正誤問題は選択肢が 2 つの単一選択問題です。",
+        "en": "True/false and single-choice share one rendering path: true/false is simply a two-option question."
+      },
+      "practiceMode": "",
+      "reviewed": false
+    }
+  ]
+}

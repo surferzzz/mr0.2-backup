@@ -116,14 +116,46 @@ namespace CPRSimulation
             }
         }
 
+        [Header("回弹（完全释放）")]
+        [Tooltip("一次按压结束时，胸部残余下压超过此值则判定为回弹不足（倚靠）。" +
+                 "AHA 要求每次按压后胸部完全回弹，倚靠会阻碍静脉回流。")]
+        public float recoilToleranceCm = 1.0f;
+
+        [Tooltip("单次按压超过此时长仍未回弹，则强制结束并标记为倚靠。" +
+                 "没有这个超时的话，倚靠会让按压永远不结束，计数和频率随之停止。")]
+        public float maxPressDurationSec = 1.5f;
+
         // 事件
         public event Action<float> OnDepthChanged;
         public event Action OnCompressionStart;
         public event Action OnCompressionEnd;
         public event Action<float, float> OnCompressionComplete; // (深度cm, 速率BPM)
 
+        /// <summary>
+        /// 一次按压的回弹评价：(残余下压cm, 是否回弹不足)。
+        /// 单独开一个事件而不是改 OnCompressionComplete 的签名 ——
+        /// 后者有 5 个订阅者分布在 4 个文件里。
+        /// </summary>
+        public event Action<float, bool> OnRecoilEvaluated;
+
+        /// <summary>上一次按压结束时胸部的残余下压量(cm)。0 表示完全回弹。</summary>
+        public float LastRecoilDeficitCm => _lastRecoilDeficitCm;
+
+        /// <summary>上一次按压是否回弹不足。</summary>
+        public bool LastRecoilIncomplete => _lastRecoilIncomplete;
+
+        /// <summary>相对真实胸面静止位的绝对深度(cm)，不受动态零点漂移影响。</summary>
+        public float AbsoluteDepthCm => _absDepthCm;
+
         // 内部状态
-        private float _restHeight;
+        // 手放在胸面上静止时的按压轴坐标（= 胸面 + 悬停高度）。
+        // 既是固定基准模式的零点，也是动态零点的上限。
+        private Vector3 _restPoint;
+        private bool _hasRestPoint;
+        private float _absDepthCm;
+        private float _pressStartTime;
+        private float _lastRecoilDeficitCm;
+        private bool _lastRecoilIncomplete;
         private Vector3 _smoothedPalmPos;
         private bool _isPressing;
         private float _lastCompressionTime = -1f;
@@ -146,14 +178,30 @@ namespace CPRSimulation
         {
             if (chestSurface == null)
             {
-                Debug.LogWarning("[CPRPressDetector] 未设置chestSurface，将使用自身位置作为胸部位置");
+                // 本组件通常就挂在位于胸口的专用空物体（CPR_ChestDetector）上，
+                // 所以退回自身 transform 是预期行为，不是配置错误。
+                // 真正要提防的是「按压轴指错方向」—— 见下面的角度自检。
                 chestSurface = transform;
             }
 
-            // 关键：基准高度 = 胸部表面 Y + 手悬停高度
-            // 患者躺平时手从上方向下按压，手降到胸面以下时才算"深度"
-            // 加上 compressionApproachHeight 后：手距胸面 12cm 时深度=0，压到胸面时深度=12cm
-            _restHeight = chestSurface.position.y + compressionApproachHeight;
+            // 按压轴：仰卧患者身上应当接近世界 Y。
+            // 注意不要把 chestSurface 指向 Mixamo 骨骼（如 mixamorig5:Spine2）——
+            // 骨骼的 up 是沿骨头方向的，在仰卧患者身上大致指向头部（水平），会把轴彻底搞错。
+            Vector3 axis = useChestAxis ? chestSurface.up.normalized : Vector3.up;
+            float axisTilt = Vector3.Angle(axis, Vector3.up);
+            if (useChestAxis && axisTilt > 30f)
+            {
+                Debug.LogWarning(
+                    $"[CPRPressDetector] 按压轴偏离竖直方向 {axisTilt:F0}°（参考物体「{chestSurface.name}」的 up）。" +
+                    "仰卧患者身上这个角度应该接近 0°。若 chestSurface 指向了骨骼，请改回胸口的空物体，" +
+                    "或关闭 useChestAxis 退回世界 Y 轴。");
+            }
+
+            _restPoint = chestSurface.position + axis * compressionApproachHeight;
+            _hasRestPoint = true;
+            _absDepthCm = 0f;
+            _lastRecoilDeficitCm = 0f;
+            _lastRecoilIncomplete = false;
             _smoothedPalmPos = Vector3.zero;
             _hasDynamicRest = false;
             _isPressing = false;
@@ -173,7 +221,10 @@ namespace CPRSimulation
             if (useDistanceFallback)
                 _distanceFallbackAdapter = FindObjectOfType<HandTrackingAdapter>();
 
-            Debug.Log($"[CPRPressDetector] 初始化完成 | 胸面Y={chestSurface.position.y:F3}m + 悬停偏移{compressionApproachHeight}m = 基准{_restHeight:F3}m | 碰撞:{useCollisionDetection} 距离备用:{useDistanceFallback}(adapter={(_distanceFallbackAdapter != null)})");
+            Debug.Log($"[CPRPressDetector] 初始化完成 | 参考「{chestSurface.name}」胸面Y={chestSurface.position.y:F3}m " +
+                      $"+ 悬停偏移{compressionApproachHeight}m | 按压轴偏离竖直{axisTilt:F1}° | " +
+                      $"动态基准:{useDynamicRestCalibration} 回弹容差{recoilToleranceCm}cm | " +
+                      $"碰撞:{useCollisionDetection} 距离备用:{useDistanceFallback}(adapter={(_distanceFallbackAdapter != null)})");
         }
 
         private void SetupCollisionDetection()
@@ -205,15 +256,23 @@ namespace CPRSimulation
             _compressionCount = 0;
             _currentRateBPM = 0f;
             _lastCompressionTime = -1f;
+            _lastRecoilDeficitCm = 0f;
+            _lastRecoilIncomplete = false;
         }
 
         private void Update()
         {
             if (!_isInitialized) return;
 
-            // 每帧动态更新基准高度，防止患者动画/位移导致基准钙假
+            // 每帧动态更新基准点，防止患者动画/位移导致基准失效。
+            // 原来这里只算 Y 高度，深度却是投影到按压轴算的 —— 轴一旦不是世界 Y，
+            // 两者就不自洽。现在按同一个轴算成 Vector3。
             if (chestSurface != null)
-                _restHeight = chestSurface.position.y + compressionApproachHeight;
+            {
+                Vector3 axis = useChestAxis ? chestSurface.up.normalized : Vector3.up;
+                _restPoint = chestSurface.position + axis * compressionApproachHeight;
+                _hasRestPoint = true;
+            }
 
             if (useCollisionDetection)
             {
@@ -363,6 +422,14 @@ namespace CPRSimulation
                 ? chestSurface.up.normalized
                 : Vector3.up;
 
+            // 真实胸面静止位。动态基准模式下深度是相对手自己的释放位算的，
+            // 那个零点会漂；这个是不漂的绝对参考，用来量回弹和夹住零点。
+            Vector3 restPoint = _hasRestPoint
+                ? _restPoint
+                : chestSurface.position + axis * compressionApproachHeight;
+
+            _absDepthCm = Mathf.Max(0f, Vector3.Dot(restPoint - handPosition, axis)) * 100f;
+
             if (useDynamicRestCalibration)
             {
                 // 初回接触：現在の手位置を「リリース基準」とする
@@ -377,15 +444,22 @@ namespace CPRSimulation
                     _dynamicRestPos = _smoothedPalmPos;
                 }
 
+                // 夹取：动态零点只能向上棘轮式抬升，没有上限的话，
+                // 学员的手在触发区内向上弹一点，零点就跟着抬一点，
+                // 下一次按压是从抬高后的位置起算 —— 深度被高报。
+                // 真实胸面静止位就是物理上的天花板，手不可能比它更「静止」。
+                float aboveRest = Vector3.Dot(_dynamicRestPos - restPoint, axis);
+                if (aboveRest > 0f)
+                    _dynamicRestPos -= axis * aboveRest;
+
                 smoothedDepthCm = Mathf.Max(0f, Vector3.Dot(_dynamicRestPos - _smoothedPalmPos, axis)) * 100f;
                 rawDepthCm = Mathf.Max(0f, Vector3.Dot(_dynamicRestPos - handPosition, axis)) * 100f;
             }
             else
             {
                 // 固定基準：胸面 + ホバー高さ。軸方向に沿って下向きへ投影する
-                Vector3 restPoint = chestSurface.position + axis * compressionApproachHeight;
                 smoothedDepthCm = Mathf.Max(0f, Vector3.Dot(restPoint - _smoothedPalmPos, axis)) * 100f;
-                rawDepthCm = Mathf.Max(0f, Vector3.Dot(restPoint - handPosition, axis)) * 100f;
+                rawDepthCm = _absDepthCm;
             }
         }
 
@@ -423,6 +497,7 @@ namespace CPRSimulation
                 {
                     _isPressing = true;
                     _peakDepthThisPress = rawDepthCm;
+                    _pressStartTime = Time.time;
                     OnCompressionStart?.Invoke();
                 }
             }
@@ -433,7 +508,18 @@ namespace CPRSimulation
 
                 // 回弹到释放阈值以下才算一次结束
                 if (smoothedDepthCm <= releaseDepthCm)
+                {
                     EndCompression();
+                }
+                else if (Time.time - _pressStartTime > maxPressDurationSec)
+                {
+                    // 倚靠（回弹不足）：学员压下去之后没有完全松开。
+                    // 动态零点只能向上抬，所以倚靠时深度永远降不到释放阈值以下，
+                    // 这一次按压就永远不会「结束」—— 计数停住、频率跟着往下掉，
+                    // 学员看到的是「频率太慢」，而真实错误是回弹不足，诊断被错配。
+                    // 超时强制收尾，并让 EndCompression 用绝对深度判定回弹。
+                    EndCompression();
+                }
             }
         }
 
@@ -442,8 +528,15 @@ namespace CPRSimulation
             if (!_isPressing) return;
             
             _isPressing = false;
+
+            // 回弹评价：用「相对真实胸面」的绝对深度，而不是相对动态零点的深度。
+            // 动态零点会跟着手漂，用它算回弹永远是 0，测不出倚靠。
+            _lastRecoilDeficitCm = _absDepthCm;
+            _lastRecoilIncomplete = _absDepthCm > recoilToleranceCm;
+
             _currentDepthCm = 0f;
             RecordCompression();
+            OnRecoilEvaluated?.Invoke(_lastRecoilDeficitCm, _lastRecoilIncomplete);
             OnCompressionEnd?.Invoke();
         }
 
@@ -473,7 +566,9 @@ namespace CPRSimulation
 
             OnCompressionComplete?.Invoke(_peakDepthThisPress, _currentRateBPM);
             
-            Debug.Log($"[CPRPressDetector] 按压#{_compressionCount}: 深度={_peakDepthThisPress:F1}cm, 速率={_currentRateBPM:F0}BPM");
+            Debug.Log($"[CPRPressDetector] 按压#{_compressionCount}: 深度={_peakDepthThisPress:F1}cm, " +
+                      $"速率={_currentRateBPM:F0}BPM, 回弹残余={_lastRecoilDeficitCm:F1}cm" +
+                      (_lastRecoilIncomplete ? " ← 回弹不足" : ""));
         }
 
         // 用于调试 - 在Scene视图中绘制检测区域
