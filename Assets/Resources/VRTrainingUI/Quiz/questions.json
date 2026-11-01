@@ -1,74 +1,316 @@
 {
   "version": 1,
 
-  "_note_zh": "占位题库：内容仅用于跑通流程，不是真实医学题目。正式题目请由教员编写并把 reviewed 改为 true。",
-  "_note_ja": "プレースホルダー問題集：フロー確認用であり、実際の医学問題ではありません。",
-  "_note_en": "Placeholder bank: flow-testing content only, not real medical questions.",
+  "_source_zh": "题目依据 JRC 苏生指南 2025 / AHA 2025 成人 BLS。所有题目 reviewed 均为 false，须由教员逐条核实后改为 true。",
+  "_source_ja": "JRC 蘇生ガイドライン 2025 / AHA 2025 成人 BLS に基づく。全問 reviewed=false。教員が内容を確認のうえ true に変更してください。",
+  "_source_en": "Based on JRC 2025 / AHA 2025 adult BLS. All items are reviewed=false and must be verified by an instructor before being set to true.",
 
   "topics": [
     {
-      "id": "sample",
-      "title": {
-        "zh": "示例主题（占位）",
-        "ja": "サンプル分野（プレースホルダー）",
-        "en": "Sample topic (placeholder)"
-      }
+      "id": "compression",
+      "title": { "zh": "胸外按压", "ja": "胸骨圧迫", "en": "Chest compressions" }
     },
     {
-      "id": "compression",
-      "title": {
-        "zh": "胸外按压",
-        "ja": "胸骨圧迫",
-        "en": "Chest compressions"
-      }
+      "id": "ventilation",
+      "title": { "zh": "人工呼吸", "ja": "人工呼吸", "en": "Ventilation" }
+    },
+    {
+      "id": "interruption",
+      "title": { "zh": "减少中断", "ja": "中断の最小化", "en": "Minimising interruptions" }
+    },
+    {
+      "id": "aed",
+      "title": { "zh": "AED 使用", "ja": "AED の使用", "en": "Using an AED" }
+    },
+    {
+      "id": "assessment",
+      "title": { "zh": "初期评估", "ja": "初期評価", "en": "Initial assessment" }
     }
   ],
 
   "questions": [
     {
-      "id": "sample_single",
-      "topic": "sample",
+      "id": "compression_depth",
+      "topic": "compression",
       "type": "single",
       "stem": {
-        "zh": "【示例题·非医学内容】下列哪一个选项被题库标记为正确答案？",
-        "ja": "【サンプル問題・医学内容ではありません】次のうち、正解として登録されている選択肢はどれですか？",
-        "en": "[Sample question - not medical content] Which option is registered as the correct answer?"
+        "zh": "对成人进行胸外按压时，推荐的按压深度是多少？",
+        "ja": "成人に胸骨圧迫を行うとき、推奨される圧迫の深さはどれですか？",
+        "en": "What compression depth is recommended for an adult?"
       },
       "options": [
-        { "zh": "选项 A", "ja": "選択肢 A", "en": "Option A" },
-        { "zh": "选项 B（这个是正确答案）", "ja": "選択肢 B（これが正解）", "en": "Option B (this is correct)" },
-        { "zh": "选项 C", "ja": "選択肢 C", "en": "Option C" },
-        { "zh": "选项 D", "ja": "選択肢 D", "en": "Option D" }
+        { "zh": "约 3 cm", "ja": "約 3 cm", "en": "About 3 cm" },
+        { "zh": "约 5 cm（不超过 6 cm）", "ja": "約 5 cm（6 cm を超えない）", "en": "About 5 cm (not more than 6 cm)" },
+        { "zh": "约 7 cm", "ja": "約 7 cm", "en": "About 7 cm" },
+        { "zh": "越深越好，无上限", "ja": "深いほど良く、上限はない", "en": "As deep as possible, no upper limit" }
       ],
       "answer": 1,
       "explanation": {
-        "zh": "这是解析文案的显示位置。答错时会展示这段文字，用来说明为什么正确答案是对的。",
-        "ja": "ここが解説の表示位置です。誤答時にこの文章が表示され、正解の理由を説明します。",
-        "en": "This is where the explanation appears. It is shown after a wrong answer to explain the correct choice."
+        "zh": "成人按压深度约 5 cm，不超过 6 cm。太浅无法产生足够的血流，超过 6 cm 会增加肋骨骨折和内脏损伤的风险。",
+        "ja": "成人の圧迫の深さは約 5 cm、6 cm を超えないようにします。浅すぎると十分な血流が得られず、6 cm を超えると肋骨骨折や臓器損傷の危険が高まります。",
+        "en": "Compress about 5 cm and no more than 6 cm. Too shallow will not generate adequate blood flow; beyond 6 cm raises the risk of rib fractures and internal injury."
       },
       "practiceMode": "CPR",
       "reviewed": false
     },
     {
-      "id": "sample_truefalse",
-      "topic": "sample",
+      "id": "compression_rate",
+      "topic": "compression",
+      "type": "single",
+      "stem": {
+        "zh": "胸外按压的推荐频率是多少？",
+        "ja": "胸骨圧迫の推奨テンポはどれですか？",
+        "en": "What is the recommended compression rate?"
+      },
+      "options": [
+        { "zh": "60–80 次/分", "ja": "60〜80 回/分", "en": "60-80 per minute" },
+        { "zh": "80–100 次/分", "ja": "80〜100 回/分", "en": "80-100 per minute" },
+        { "zh": "100–120 次/分", "ja": "100〜120 回/分", "en": "100-120 per minute" },
+        { "zh": "140 次/分以上", "ja": "140 回/分以上", "en": "140 per minute or more" }
+      ],
+      "answer": 2,
+      "explanation": {
+        "zh": "推荐 100–120 次/分。低于 100 次血流不足；超过 120 次时，胸廓来不及完全回弹，反而使每次按压的输出量下降。",
+        "ja": "推奨は 100〜120 回/分です。100 回未満では血流が不足し、120 回を超えると胸が完全に戻りきらず、かえって 1 回あたりの拍出量が減ります。",
+        "en": "Aim for 100-120/min. Below 100 gives inadequate flow; above 120 the chest cannot recoil fully, which lowers the output of each compression."
+      },
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "compression_recoil",
+      "topic": "compression",
       "type": "truefalse",
       "stem": {
-        "zh": "【示例判断题·非医学内容】这道题是占位内容，不是真实的医学考题。",
-        "ja": "【サンプル正誤問題・医学内容ではありません】この問題はプレースホルダーであり、実際の医学問題ではありません。",
-        "en": "[Sample true/false - not medical content] This question is placeholder content, not a real medical question."
+        "zh": "为了保持节奏，可以把手轻轻靠在胸口上不完全抬起。",
+        "ja": "リズムを保つため、手を胸に軽く預けたまま完全に離さなくてもよい。",
+        "en": "To keep a steady rhythm it is acceptable to rest your hands on the chest without releasing fully."
       },
       "options": [
         { "zh": "正确", "ja": "正しい", "en": "True" },
         { "zh": "错误", "ja": "間違い", "en": "False" }
       ],
+      "answer": 1,
+      "explanation": {
+        "zh": "错误。每次按压后必须让胸廓完全回弹，手不能压在胸口上。倚靠会使胸腔内压升高，阻碍静脉血回流心脏，下一次按压能泵出的血量随之减少。",
+        "ja": "間違いです。圧迫のたびに胸を完全に元へ戻し、手を胸に預けてはいけません。もたれかかると胸腔内圧が下がりきらず、静脈血が心臓に戻れなくなり、次の圧迫で送り出せる血液量が減ります。",
+        "en": "False. Let the chest recoil completely after every compression and do not lean on it. Leaning keeps intrathoracic pressure high, blocks venous return, and reduces the volume the next compression can pump."
+      },
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "compression_position",
+      "topic": "compression",
+      "type": "single",
+      "stem": {
+        "zh": "成人胸外按压时，掌根应放在哪里？",
+        "ja": "成人の胸骨圧迫では、手のひらの付け根をどこに置きますか？",
+        "en": "Where should the heel of your hand go for adult compressions?"
+      },
+      "options": [
+        { "zh": "胸骨下半部（约两乳头连线中点）", "ja": "胸骨の下半分（両乳頭を結ぶ線の中央付近）", "en": "The lower half of the sternum (about the centre of the nipple line)" },
+        { "zh": "胸骨最上端（胸骨柄）", "ja": "胸骨の最上部（胸骨柄）", "en": "The very top of the sternum (manubrium)" },
+        { "zh": "胸骨最下端的剑突上", "ja": "胸骨の下端にある剣状突起の上", "en": "On the xiphoid process at the bottom of the sternum" },
+        { "zh": "左胸心脏正上方的肋骨上", "ja": "左胸の心臓の真上にある肋骨の上", "en": "On the ribs over the heart on the left side" }
+      ],
       "answer": 0,
       "explanation": {
-        "zh": "判断题和单选题走同一条渲染路径 —— 判断题就是只有两个选项的单选题。",
-        "ja": "正誤問題と単一選択問題は同じ描画経路を通ります。正誤問題は選択肢が 2 つの単一選択問題です。",
-        "en": "True/false and single-choice share one rendering path: true/false is simply a two-option question."
+        "zh": "掌根应放在胸骨下半部。压在剑突上可能造成肝脏损伤，压在肋骨上容易骨折且无法有效压迫心脏。",
+        "ja": "手のひらの付け根は胸骨の下半分に置きます。剣状突起の上では肝損傷を、肋骨の上では骨折を招き、いずれも心臓を有効に圧迫できません。",
+        "en": "Place the heel of the hand on the lower half of the sternum. Over the xiphoid risks liver injury; over the ribs risks fractures and fails to compress the heart effectively."
       },
-      "practiceMode": "",
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "cv_ratio",
+      "topic": "ventilation",
+      "type": "single",
+      "stem": {
+        "zh": "未建立高级气道时，成人 CPR 的按压与人工呼吸比例是多少？",
+        "ja": "高度な気道確保をしていない成人の CPR で、胸骨圧迫と人工呼吸の比はどれですか？",
+        "en": "Without an advanced airway, what is the adult compression-to-ventilation ratio?"
+      },
+      "options": [
+        { "zh": "15:2", "ja": "15:2", "en": "15:2" },
+        { "zh": "30:2", "ja": "30:2", "en": "30:2" },
+        { "zh": "5:1", "ja": "5:1", "en": "5:1" },
+        { "zh": "只做按压，任何情况都不做人工呼吸", "ja": "圧迫のみで、いかなる場合も人工呼吸は行わない", "en": "Compressions only, never any ventilation" }
+      ],
+      "answer": 1,
+      "explanation": {
+        "zh": "成人为 30:2。若施救者不愿或不能做人工呼吸，应持续进行仅按压 CPR，而不是什么都不做。",
+        "ja": "成人では 30:2 です。人工呼吸ができない、またはためらう場合は、何もしないのではなく胸骨圧迫のみの CPR を続けます。",
+        "en": "For adults it is 30:2. If a rescuer is unwilling or unable to give breaths, continue compression-only CPR rather than doing nothing."
+      },
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "ventilation_volume",
+      "topic": "ventilation",
+      "type": "single",
+      "stem": {
+        "zh": "每次人工呼吸应吹多久、吹多少？",
+        "ja": "1 回の人工呼吸はどのくらいの時間と量で行いますか？",
+        "en": "How long and how much should each rescue breath be?"
+      },
+      "options": [
+        { "zh": "约 1 秒，吹到胸廓可见抬起即可", "ja": "約 1 秒、胸の上がりが見える程度", "en": "About 1 second, just enough to see the chest rise" },
+        { "zh": "约 3 秒，尽可能用力吹", "ja": "約 3 秒、できるだけ強く吹き込む", "en": "About 3 seconds, as forcefully as possible" },
+        { "zh": "连续快速吹 5 次", "ja": "続けて素早く 5 回吹き込む", "en": "Five rapid breaths in a row" },
+        { "zh": "吹到胸部明显鼓起为止", "ja": "胸が大きく膨らむまで吹き込む", "en": "Until the chest visibly bulges" }
+      ],
+      "answer": 0,
+      "explanation": {
+        "zh": "每次约 1 秒，以胸廓可见抬起为准。过量通气会使胸腔内压升高、阻碍静脉回流，还会造成胃胀气和误吸。",
+        "ja": "1 回約 1 秒、胸の上がりが見える程度にします。過換気は胸腔内圧を上げて静脈還流を妨げ、胃膨満と誤嚥の原因にもなります。",
+        "en": "About 1 second each, just enough for visible chest rise. Over-ventilation raises intrathoracic pressure, impedes venous return, and causes gastric inflation and aspiration."
+      },
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "interruption_limit",
+      "topic": "interruption",
+      "type": "single",
+      "stem": {
+        "zh": "为换人、分析心律等原因中断按压时，中断时间应控制在多少以内？",
+        "ja": "交代や心電図解析などで胸骨圧迫を中断するとき、中断は何秒以内に抑えますか？",
+        "en": "When compressions must pause for a rotation or rhythm check, how long may the pause last?"
+      },
+      "options": [
+        { "zh": "10 秒以内", "ja": "10 秒以内", "en": "Under 10 seconds" },
+        { "zh": "30 秒以内", "ja": "30 秒以内", "en": "Under 30 seconds" },
+        { "zh": "1 分钟以内", "ja": "1 分以内", "en": "Under 1 minute" },
+        { "zh": "没有时间限制", "ja": "時間の制限はない", "en": "There is no limit" }
+      ],
+      "answer": 0,
+      "explanation": {
+        "zh": "中断应控制在 10 秒以内。每次中断冠状动脉灌注压都会迅速下降，恢复按压后需要若干次按压才能重新建立，所以换人和电极片粘贴都要提前准备好。",
+        "ja": "中断は 10 秒未満に抑えます。中断のたびに冠灌流圧が急速に低下し、再開後に元へ戻すまで何回もの圧迫を要します。交代やパッド装着は事前に準備しておきます。",
+        "en": "Keep pauses under 10 seconds. Coronary perfusion pressure falls quickly during any pause and takes several compressions to rebuild, so prepare rotations and pad placement in advance."
+      },
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "rotation_interval",
+      "topic": "interruption",
+      "type": "single",
+      "stem": {
+        "zh": "有多名施救者时，按压者应该多久轮换一次？",
+        "ja": "複数の救助者がいる場合、圧迫を行う人はどのくらいの間隔で交代しますか？",
+        "en": "With several rescuers available, how often should the compressor be swapped?"
+      },
+      "options": [
+        { "zh": "约每 2 分钟", "ja": "約 2 分ごと", "en": "About every 2 minutes" },
+        { "zh": "约每 10 分钟", "ja": "約 10 分ごと", "en": "About every 10 minutes" },
+        { "zh": "感到疲劳后再换", "ja": "疲れを感じてから交代する", "en": "Only once you feel tired" },
+        { "zh": "不需要轮换", "ja": "交代の必要はない", "en": "No rotation is needed" }
+      ],
+      "answer": 0,
+      "explanation": {
+        "zh": "约每 2 分钟轮换一次，并在轮换时把中断控制在 10 秒以内。施救者往往在自己察觉疲劳之前，按压深度就已经开始下降。",
+        "ja": "約 2 分ごとに交代し、そのときの中断は 10 秒未満にします。救助者は疲労を自覚する前から、すでに圧迫の深さが落ち始めています。",
+        "en": "Swap about every 2 minutes, keeping that pause under 10 seconds. Compression depth starts to fall before the rescuer notices any fatigue."
+      },
+      "practiceMode": "CPR",
+      "reviewed": false
+    },
+    {
+      "id": "assessment_gasping",
+      "topic": "assessment",
+      "type": "truefalse",
+      "stem": {
+        "zh": "倒地者出现断续的、像叹气一样的喘息（濒死呼吸）时，说明还在正常呼吸，应观察等待。",
+        "ja": "倒れている人が途切れがちな、あえぐような呼吸（死戦期呼吸）をしている場合、正常な呼吸があるので様子を見てよい。",
+        "en": "If a collapsed person shows irregular, gasping breaths (agonal breathing), they are breathing normally and you should wait and watch."
+      },
+      "options": [
+        { "zh": "正确", "ja": "正しい", "en": "True" },
+        { "zh": "错误", "ja": "間違い", "en": "False" }
+      ],
+      "answer": 1,
+      "explanation": {
+        "zh": "错误。濒死呼吸不是正常呼吸，是心脏骤停的常见表现。判断为反应消失且无正常呼吸时，应立即开始胸外按压并呼叫救援、取来 AED。",
+        "ja": "間違いです。死戦期呼吸は正常な呼吸ではなく、心停止でよくみられる所見です。反応がなく正常な呼吸がないと判断したら、直ちに胸骨圧迫を開始し、応援と AED を要請します。",
+        "en": "False. Agonal gasping is not normal breathing; it is a common sign of cardiac arrest. If the person is unresponsive and not breathing normally, start compressions at once and call for help and an AED."
+      },
+      "practiceMode": "Story",
+      "reviewed": false
+    },
+    {
+      "id": "aed_shockable",
+      "topic": "aed",
+      "type": "single",
+      "stem": {
+        "zh": "下列哪一组是 AED 可以电击（可除颤）的心律？",
+        "ja": "次のうち、AED でショックが適応となる（除細動可能な）心電図はどれですか？",
+        "en": "Which pair of rhythms is shockable by an AED?"
+      },
+      "options": [
+        { "zh": "心搏停止（Asystole）与无脉电活动（PEA）", "ja": "心静止（Asystole）と無脈性電気活動（PEA）", "en": "Asystole and pulseless electrical activity (PEA)" },
+        { "zh": "心室颤动（VF）与无脉性室性心动过速（pulseless VT）", "ja": "心室細動（VF）と無脈性心室頻拍（pulseless VT）", "en": "Ventricular fibrillation (VF) and pulseless ventricular tachycardia" },
+        { "zh": "窦性心动过缓与心房颤动", "ja": "洞性徐脈と心房細動", "en": "Sinus bradycardia and atrial fibrillation" },
+        { "zh": "所有心律都可以电击", "ja": "すべての心電図でショックが適応となる", "en": "Every rhythm is shockable" }
+      ],
+      "answer": 1,
+      "explanation": {
+        "zh": "可电击心律为 VF 和无脉性 VT。心搏停止和 PEA 不可电击，此时应继续高质量 CPR 并寻找可逆病因。",
+        "ja": "ショック適応は VF と無脈性 VT です。心静止と PEA は適応外で、質の高い CPR を続けながら可逆的な原因を検索します。",
+        "en": "VF and pulseless VT are shockable. Asystole and PEA are not; continue high-quality CPR and look for reversible causes."
+      },
+      "practiceMode": "AED",
+      "reviewed": false
+    },
+    {
+      "id": "aed_pad_placement",
+      "topic": "aed",
+      "type": "single",
+      "stem": {
+        "zh": "成人使用 AED 时，两片电极片的标准位置是？",
+        "ja": "成人に AED を使用するとき、2 枚の電極パッドの標準的な貼付位置はどこですか？",
+        "en": "Where do the two AED pads go on an adult?"
+      },
+      "options": [
+        { "zh": "右锁骨下方与左腋中线下方（左侧胸部外下方）", "ja": "右鎖骨の下と左腋窩中線の下（左胸の外側下方）", "en": "Below the right clavicle and below the left armpit (mid-axillary line)" },
+        { "zh": "两片都贴在左胸心脏正上方", "ja": "2 枚とも左胸の心臓の真上に貼る", "en": "Both directly over the heart on the left chest" },
+        { "zh": "贴在腹部两侧", "ja": "腹部の両側に貼る", "en": "On either side of the abdomen" },
+        { "zh": "贴在两侧肩膀上", "ja": "両肩に貼る", "en": "On both shoulders" }
+      ],
+      "answer": 0,
+      "explanation": {
+        "zh": "标准为前侧位：一片贴在右锁骨下方，另一片贴在左腋中线下方，使电流经过心脏。两片贴得太近，电流会在体表短路而绕过心脏。",
+        "ja": "標準は前側壁配置です。1 枚を右鎖骨の下、もう 1 枚を左腋窩中線の下に貼り、電流が心臓を通るようにします。2 枚が近すぎると電流が体表を短絡し、心臓を迂回します。",
+        "en": "Use the anterolateral position: one pad below the right clavicle, the other below the left armpit, so current crosses the heart. Pads placed too close together short-circuit across the skin and bypass the heart."
+      },
+      "practiceMode": "AED",
+      "reviewed": false
+    },
+    {
+      "id": "aed_after_shock",
+      "topic": "aed",
+      "type": "single",
+      "stem": {
+        "zh": "AED 完成一次电击后，应该立即做什么？",
+        "ja": "AED でショックを 1 回実施した直後、すぐに何をしますか？",
+        "en": "Immediately after an AED delivers a shock, what should you do?"
+      },
+      "options": [
+        { "zh": "立即从胸外按压开始恢复 CPR", "ja": "直ちに胸骨圧迫から CPR を再開する", "en": "Resume CPR at once, starting with compressions" },
+        { "zh": "先花 30 秒检查脉搏", "ja": "まず 30 秒かけて脈拍を確認する", "en": "Spend 30 seconds checking for a pulse" },
+        { "zh": "等待 AED 再次分析后再说", "ja": "AED が再解析するまで待つ", "en": "Wait until the AED analyses again" },
+        { "zh": "取下电极片", "ja": "電極パッドを剥がす", "en": "Remove the pads" }
+      ],
+      "answer": 0,
+      "explanation": {
+        "zh": "电击后应立即恢复胸外按压，约 2 分钟后再由 AED 分析心律。电击后心脏通常需要一段时间才能恢复有效泵血，此时停下来查脉搏只会白白延长中断。",
+        "ja": "ショック直後はただちに胸骨圧迫を再開し、約 2 分後に AED に再解析させます。ショック後の心臓が有効に拍出するまでには時間がかかり、ここで脈を探すのは中断を延ばすだけです。",
+        "en": "Resume compressions immediately and let the AED re-analyse after about 2 minutes. The heart usually needs time to produce an effective output after a shock, so checking a pulse here only lengthens the pause."
+      },
+      "practiceMode": "AED",
       "reviewed": false
     }
   ]

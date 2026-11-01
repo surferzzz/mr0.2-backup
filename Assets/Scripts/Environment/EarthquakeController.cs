@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Networking;
 using CPRSimulation;   // ProceduralAudio
 
 /// <summary>
@@ -54,6 +56,21 @@ public class EarthquakeController : MonoBehaviour
     [Tooltip("未指定 hitSfx 时用代码合成撞击/落屑声。")]
     public bool autoCreateHitSfx = true;
 
+    [Header("緊急放送（紧急播报）")]
+    [Tooltip("地震开始时播放紧急播报语音。\n" +
+             "音频从 StreamingAssets/earthquake-voice/<语言>/<key>.wav 读取，\n" +
+             "用 UnityWebRequest 加载（Android 上 StreamingAssets 在 APK 里，不能用 File.IO）。\n" +
+             "文件不存在时退回代码合成的警报音，所以没有音频也能跑。")]
+    public bool playEmergencyAnnouncement = true;
+
+    [Tooltip("播报音频的文件名（不含扩展名）。完整路径见上。")]
+    public string announcementKey = "earthquake_alert";
+
+    [Tooltip("留空则跟随 LanguageManager 的当前语言（ja / zh / en）。")]
+    public string announcementLanguageOverride = "";
+
+    public AudioSource announcementSource;
+
     [Header("Debug")]
     public bool playOnStart = false;
 
@@ -70,6 +87,9 @@ public class EarthquakeController : MonoBehaviour
     private bool[] _bodyBaseGravity;
     private bool[] _bodyBaseKinematic;
     private AudioClip _generatedRumble;
+    private AudioClip _announcementClip;
+    private AudioClip _fallbackAlert;
+    private bool _announcementRequested;
 
     private void Start()
     {
@@ -123,6 +143,8 @@ public class EarthquakeController : MonoBehaviour
             dustFX.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             dustFX.Play();
         }
+
+        PlayEmergencyAnnouncement();
     }
 
     public void Stop()
@@ -243,6 +265,116 @@ public class EarthquakeController : MonoBehaviour
         AutoBindVisualShakeTargets();
         EnsureDustFX();
         EnsureHitSfx();
+        EnsureAnnouncementSource();
+    }
+
+    private void EnsureAnnouncementSource()
+    {
+        if (!playEmergencyAnnouncement || announcementSource != null)
+            return;
+
+        var host = new GameObject("EarthquakeAnnouncement");
+        host.transform.SetParent(transform, false);
+        announcementSource = host.AddComponent<AudioSource>();
+        announcementSource.playOnAwake = false;
+        announcementSource.spatialBlend = 0f;   // 广播是全场的，不做定位
+        announcementSource.volume = 0.9f;
+        announcementSource.priority = 0;        // 压过轰鸣和落屑声
+    }
+
+    /// <summary>
+    /// 播放紧急播报。优先用 StreamingAssets 里的授权音频，没有就退回合成警报音。
+    ///
+    /// 刻意不内置任何真实的緊急地震速報音源：那段旋律有著作权，
+    /// 而且日本对它在非紧急场合的使用有明确的社会规范 —— 人们被训练成
+    /// 听到就立即反应，随便播放是有害的。这里合成的是一个明显不同的双音警报，
+    /// 只作占位；正式用途请放入你自己取得授权的音频（见 README）。
+    /// </summary>
+    private void PlayEmergencyAnnouncement()
+    {
+        if (!playEmergencyAnnouncement || announcementSource == null)
+            return;
+
+        if (_announcementClip != null)
+        {
+            announcementSource.PlayOneShot(_announcementClip);
+            return;
+        }
+
+        // 先放占位警报音，真实音频异步加载完之后的那次地震才会用上它
+        announcementSource.PlayOneShot(GetFallbackAlertClip());
+
+        if (!_announcementRequested)
+        {
+            _announcementRequested = true;
+            StartCoroutine(LoadAnnouncementClip());
+        }
+    }
+
+    private AudioClip GetFallbackAlertClip()
+    {
+        if (_fallbackAlert == null)
+        {
+            // 双音交替，重复三轮。刻意避开真实速报音的音程关系。
+            _fallbackAlert = ProceduralAudio.CreateSequence(
+                "EarthquakeAlertFallback",
+                new[] { 880f, 660f, 880f, 660f, 880f, 660f },
+                noteSeconds: 0.22f,
+                volume: 0.5f);
+        }
+
+        return _fallbackAlert;
+    }
+
+    private string ResolveAnnouncementLanguage()
+    {
+        if (!string.IsNullOrWhiteSpace(announcementLanguageOverride))
+            return announcementLanguageOverride.Trim();
+
+        // LanguageManager 是 MonoBehaviour 单例，可能还没建起来 —— 默认日语，
+        // 和 LanguageManager.Get 无实例时的回退保持一致。
+        var mgr = LanguageManager.Instance;
+        if (mgr == null)
+            return "ja";
+
+        switch (mgr.CurrentLanguage)
+        {
+            case Language.Chinese: return "zh";
+            case Language.English: return "en";
+            default: return "ja";
+        }
+    }
+
+    private IEnumerator LoadAnnouncementClip()
+    {
+        string lang = ResolveAnnouncementLanguage();
+        string relative = $"earthquake-voice/{lang}/{announcementKey}.wav";
+
+        // Android 上 StreamingAssets 打在 APK 里，路径是 jar:file:///...，
+        // 不能用 System.IO 读，必须走 UnityWebRequest。这和 AED 语音同一套做法。
+        string root = Application.streamingAssetsPath;
+        string full = root.Contains("://") || root.StartsWith("jar:")
+            ? root.TrimEnd('/') + "/" + relative
+            : new System.Uri(System.IO.Path.Combine(root, relative)).AbsoluteUri;
+
+        using (var request = UnityWebRequestMultimedia.GetAudioClip(full, AudioType.WAV))
+        {
+            yield return request.SendWebRequest();
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Debug.Log($"[Earthquake] 未找到紧急播报音频（{relative}），继续使用合成警报音。" +
+                          "放入授权音频后会自动改用它。");
+                yield break;
+            }
+
+            _announcementClip = DownloadHandlerAudioClip.GetContent(request);
+            if (_announcementClip != null)
+            {
+                _announcementClip.name = announcementKey;
+                Debug.Log($"[Earthquake] 已载入紧急播报音频：{relative}");
+            }
+        }
     }
 
     // 结构件不该跟着晃：墙、地、天花板、门、装饰条、灯、标识、地垫、边界。

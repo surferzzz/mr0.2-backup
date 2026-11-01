@@ -38,8 +38,11 @@ namespace VRFirstAid.Equipment
         private const float MarkerHeightOffset = 0.045f;
         private const float ShockFlashSeconds = 0.8f;
         private const float WorldUiScale = 0.00065f;
-        private const float AedWorldUiHeightAboveHead = 0.36f;
-        private const float AedWorldUiDistanceTowardViewer = 0.12f;
+        // 原来是「头部上方 0.36m、再朝学员方向偏 0.12m」，和 CPR HUD 犯的是同一个错：
+        // 把面板放进了学员和患者之间，而贴电极片恰恰要够到胸口。
+        // 现在和 CPR HUD 用同一套摆法：身体另一侧、板面与躯干平行。
+        private const float AedWorldUiHeightAboveChest = 0.42f;
+        private const float AedWorldUiSideDistance = 0.55f;
         private const float PhysicalPadGrabRadius = 0.58f;
         private const float PhysicalPadSnapRadius = 0.30f;
         private const float PhysicalPadWidth = 0.18f;
@@ -56,11 +59,9 @@ namespace VRFirstAid.Equipment
         private static readonly Vector3 AedFloorFallbackPosition = new Vector3(1.6f, 0f, -1.2f);
         private static readonly Vector3 AedPowerMarkerLocalPosition = new Vector3(-0.921f, 0.112f, 1.14f);
 
-        [Tooltip("调试用：勾选后每次分析都判定为可电击心律，忽略下方概率。")]
+        [Tooltip("调试用：勾选后每次分析都判定为室颤，跳过控制器上的心律设定。" +
+                 "本类是运行时创建的，这个字段在 Inspector 里看不到，只能改代码默认值。")]
         [SerializeField] private bool alwaysAdviseShock = false;
-        [Tooltip("分析时判定为可电击心律(室颤/无脉室速)的概率，其余为不可电击心律(心搏停止/PEA)。")]
-        [Range(0f, 1f)]
-        [SerializeField] private float shockableRhythmProbability = 0.65f;
         [SerializeField] private float analysisDuration = 3f;
 
         [Header("语音引导")]
@@ -126,6 +127,10 @@ namespace VRFirstAid.Equipment
         public static bool ResultShockAdvised { get; private set; }
         public static bool ResultShockDelivered { get; private set; }
         public static float ResultDurationSeconds { get; private set; }
+        /// <summary>研究用：両パッド装着までの秒数。未装着なら 0。</summary>
+        public static float ResultTimeToPadsSeconds { get; private set; }
+        /// <summary>研究用：通電までの秒数。放電しなかった回は 0。</summary>
+        public static float ResultTimeToShockSeconds { get; private set; }
         public static SimulatedRhythm ResultRhythm { get; private set; }
         private GameObject powerMarker;
         private GameObject shockMarker;
@@ -219,12 +224,39 @@ namespace VRFirstAid.Equipment
         {
             SceneManager.activeSceneChanged += HandleActiveSceneChanged;
             SubscribeToTrainingEvents();
+            SubscribeToLanguageChanges();
         }
 
         private void OnDisable()
         {
             SceneManager.activeSceneChanged -= HandleActiveSceneChanged;
             UnsubscribeFromTrainingEvents();
+
+            if (_languageHookedTo != null)
+            {
+                _languageHookedTo.OnLanguageChanged -= RefreshLocalizedUi;
+                _languageHookedTo = null;
+            }
+        }
+
+        private LanguageManager _languageHookedTo;
+
+        /// <summary>
+        /// LanguageManager 由 CPRTrainingController.Start() 运行时创建，
+        /// 本组件是 RuntimeInitializeOnLoadMethod 自举的，OnEnable 时它可能还不存在。
+        /// 所以订阅要能重试 —— Update 里每隔一阵核对一次。
+        /// </summary>
+        private void SubscribeToLanguageChanges()
+        {
+            LanguageManager manager = LanguageManager.Instance;
+            if (manager == null || ReferenceEquals(manager, _languageHookedTo))
+                return;
+
+            if (_languageHookedTo != null)
+                _languageHookedTo.OnLanguageChanged -= RefreshLocalizedUi;
+
+            _languageHookedTo = manager;
+            manager.OnLanguageChanged += RefreshLocalizedUi;
         }
 
         private void Start()
@@ -240,6 +272,10 @@ namespace VRFirstAid.Equipment
         private void Update()
         {
             ResolveSceneReferences();
+
+            // LanguageManager 可能在本组件之后才建好，订阅要补一次（每秒一次足够）
+            if (_languageHookedTo == null && Time.frameCount % 60 == 0)
+                SubscribeToLanguageChanges();
 
             if (!scenarioVisible)
             {
@@ -1404,44 +1440,49 @@ namespace VRFirstAid.Equipment
             {
                 Vector3 headPosition = GetPatientHeadWorldPosition();
                 Transform viewTransform = GetPrimaryViewTransform();
-                Vector3 towardViewer = Vector3.zero;
-                if (viewTransform != null)
+
+                // 面板放在患者身体的另一侧，板面与躯干平行 —— 和 CPR HUD 同一套摆法。
+                // 贴电极片要够到胸口，AED 面板原来朝学员偏 0.12m，正好挡在这条路上。
+                Vector3 chestPosition = chestReference != null ? chestReference.position : patientRoot.position;
+                Vector3 alongBody = Vector3.ProjectOnPlane(headPosition - chestPosition, Vector3.up);
+
+                // 头部和胸口几乎重合（拿不到骨骼、退化成同一个点）时躯干轴线不可信，
+                // 把「学员→患者」当成横向，反推一条躯干轴。
+                if (alongBody.sqrMagnitude < 0.0001f && viewTransform != null)
                 {
-                    towardViewer = Vector3.ProjectOnPlane(viewTransform.position - headPosition, Vector3.up);
+                    Vector3 towardPatient = Vector3.ProjectOnPlane(chestPosition - viewTransform.position, Vector3.up);
+                    alongBody = Vector3.Cross(Vector3.up, towardPatient);
                 }
 
-                if (towardViewer.sqrMagnitude < 0.001f && patientRoot != null)
+                if (alongBody.sqrMagnitude < 0.0001f)
                 {
-                    towardViewer = Vector3.ProjectOnPlane(-patientRoot.forward, Vector3.up);
+                    alongBody = Vector3.forward;
                 }
 
-                Vector3 uiPosition = headPosition + Vector3.up * AedWorldUiHeightAboveHead;
-                if (towardViewer.sqrMagnitude > 0.001f)
+                alongBody.Normalize();
+
+                // 躯干横向，取背离学员的那一侧。
+                Vector3 side = Vector3.Cross(Vector3.up, alongBody).normalized;
+                if (viewTransform != null && Vector3.Dot(side, viewTransform.position - chestPosition) > 0f)
                 {
-                    uiPosition += towardViewer.normalized * AedWorldUiDistanceTowardViewer;
+                    side = -side;
                 }
+
+                Vector3 uiPosition = chestPosition + side * AedWorldUiSideDistance;
+                uiPosition.y = chestPosition.y + AedWorldUiHeightAboveChest;
 
                 aedWorldCanvasRect.SetParent(transform, true);
                 aedWorldCanvasRect.position = uiPosition;
 
-                if (viewTransform != null)
-                {
-                    Vector3 faceDirection = aedWorldCanvasRect.position - viewTransform.position;
-                    if (faceDirection.sqrMagnitude > 0.001f)
-                    {
-                        aedWorldCanvasRect.rotation = Quaternion.LookRotation(faceDirection.normalized, Vector3.up);
-                    }
+                // Canvas 的 +Z 指向背离学员的一侧才正面可读；
+                // right = cross(up, side) 随之落在 ±alongBody 上，板面与躯干平行。
+                aedWorldCanvasRect.rotation = Quaternion.LookRotation(side, Vector3.up);
 
-                    if (aedWorldCanvas != null)
-                    {
-                        var viewCamera = viewTransform.GetComponent<Camera>();
-                        if (viewCamera != null)
-                            aedWorldCanvas.worldCamera = viewCamera;
-                    }
-                }
-                else
+                if (viewTransform != null && aedWorldCanvas != null)
                 {
-                    aedWorldCanvasRect.rotation = Quaternion.Euler(AedWorldUiLocalEulerAngles);
+                    var viewCamera = viewTransform.GetComponent<Camera>();
+                    if (viewCamera != null)
+                        aedWorldCanvas.worldCamera = viewCamera;
                 }
             }
             else if (scenarioRoot != null)
@@ -1456,7 +1497,33 @@ namespace VRFirstAid.Equipment
             }
 
             aedWorldCanvasRect.localScale = Vector3.one * WorldUiScale;
+            EnsureWorkspaceGuard();
             worldUiPoseFixed = true;
+        }
+
+        /// <summary>
+        /// AED 面板也挂上贴脸淡出保护。它**不会移动面板** ——
+        /// 位置由 UpdateWorldUiPose 算一次、`worldUiPoseFixed` 置位后就不再变。
+        ///
+        /// 这块面板只有 0.39m × 0.16m，比 CPR HUD 小得多，阈值相应再收一点：
+        /// 放宽的话，俯身贴电极片时面板会整块淡掉，反而没法照着提示做。
+        /// </summary>
+        private void EnsureWorkspaceGuard()
+        {
+            if (aedWorldCanvasRect == null)
+            {
+                return;
+            }
+
+            var guard = aedWorldCanvasRect.GetComponent<CprWorkspaceUIGuard>();
+            if (guard == null)
+            {
+                guard = aedWorldCanvasRect.gameObject.AddComponent<CprWorkspaceUIGuard>();
+            }
+
+            guard.fadeStartDistance = 0.50f;
+            guard.fadeEndDistance = 0.25f;
+            guard.enabled = true;
         }
 
         private Vector3 GetPatientHeadWorldPosition()
@@ -2192,7 +2259,7 @@ namespace VRFirstAid.Equipment
             if (rightPadTarget != null)
                 rightPadTarget.SetActive(true);
 
-            UpdateInstructionOverlay(LanguageManager.Get(
+            UpdateInstructionOverlay(() => LanguageManager.Get(
                 "\u5df2\u53d6\u51fa\u4e24\u7247\u7535\u6781\u8d34\u7247\u3002\u8bf7\u7528\u624b\u62ff\u8d77\u8d34\u7247\uff0c\u5206\u522b\u62d6\u5230\u60a3\u8005\u80f8\u53e3\u7684\u4e24\u4e2a AED \u6807\u8bb0\u4e0a\u3002",
                 "2\u679a\u306e\u96fb\u6975\u30d1\u30c3\u30c9\u3092\u53d6\u308a\u51fa\u3057\u307e\u3057\u305f\u3002\u624b\u3067\u30d1\u30c3\u30c9\u3092\u6301\u3061\u3001\u60a3\u8005\u306e\u80f8\u306b\u3042\u308b2\u3064\u306e AED \u30de\u30fc\u30ab\u30fc\u3078\u904b\u3093\u3067\u304f\u3060\u3055\u3044\u3002",
                 "Both electrode pads are out. Pick them up by hand and drag them to the two AED markers on the patient's chest."
@@ -2233,7 +2300,7 @@ namespace VRFirstAid.Equipment
             {
                 leftPadPlaced = true;
                 UpdatePadVisual(leftPadTarget, true);
-                UpdateInstructionOverlay(LanguageManager.Get(
+                UpdateInstructionOverlay(() => LanguageManager.Get(
                     "\u4e0a\u65b9\u7535\u6781\u7247\u5df2\u5438\u9644\u5230\u80f8\u53e3\uff0c\u8bf7\u7ee7\u7eed\u653e\u7f6e\u53e6\u4e00\u7247\u3002",
                     "\u4e0a\u5074\u306e\u30d1\u30c3\u30c9\u304c\u80f8\u306b\u5438\u7740\u3057\u307e\u3057\u305f\u3002\u7d9a\u3051\u3066\u3082\u3046\u4e00\u679a\u3092\u8cbc\u3063\u3066\u304f\u3060\u3055\u3044\u3002",
                     "Upper pad snapped to the chest. Place the second pad."
@@ -2243,7 +2310,7 @@ namespace VRFirstAid.Equipment
             {
                 rightPadPlaced = true;
                 UpdatePadVisual(rightPadTarget, true);
-                UpdateInstructionOverlay(LanguageManager.Get(
+                UpdateInstructionOverlay(() => LanguageManager.Get(
                     "\u4e0b\u65b9\u7535\u6781\u7247\u5df2\u5438\u9644\u5230\u80f8\u53e3\uff0c\u6b63\u5728\u7b49\u5f85\u5fc3\u5f8b\u5206\u6790\u3002",
                     "\u4e0b\u5074\u306e\u30d1\u30c3\u30c9\u304c\u80f8\u306b\u5438\u7740\u3057\u307e\u3057\u305f\u3002\u5fc3\u96fb\u56f3\u89e3\u6790\u3092\u958b\u59cb\u3057\u307e\u3059\u3002",
                     "Lower pad snapped to the chest. Waiting for rhythm analysis..."
@@ -2336,6 +2403,8 @@ namespace VRFirstAid.Equipment
             }
 
             ResultPadsPlaced = true;
+            // 研究用：両パッドが貼り終わった時刻。CPR 研究では time-to-pads が標準の指標。
+            ResultTimeToPadsSeconds = Mathf.Max(0f, Time.time - scenarioStartTime);
             analysisRoutine = StartCoroutine(AnalyzeRhythm());
             UpdateControlButtons();
         }
@@ -2400,12 +2469,18 @@ namespace VRFirstAid.Equipment
             ResultShockAdvised = false;
             ResultShockDelivered = false;
             ResultDurationSeconds = 0f;
+            ResultTimeToPadsSeconds = 0f;
+            ResultTimeToShockSeconds = 0f;
         }
 
         private void FinalizeAedResult(bool shockDelivered)
         {
             ResultShockDelivered = shockDelivered;
             ResultDurationSeconds = Mathf.Max(0f, Time.time - scenarioStartTime);
+            // 研究用：通電までの時間。放電していない回は 0 のままにして、
+            // 「速かった」と「やらなかった」が同じ値にならないようにする。
+            if (shockDelivered)
+                ResultTimeToShockSeconds = ResultDurationSeconds;
             HasResult = true;
         }
 
@@ -2479,9 +2554,42 @@ namespace VRFirstAid.Equipment
             return LanguageManager.Get("继续加油", "要改善", "Keep practicing");
         }
 
+        /// <summary>
+        /// 决定本次分析出的心律。
+        ///
+        /// 默认是**固定**的，不再随机。以前的写法是 65% 概率抽可电击心律，
+        /// 于是结果页上「是否建议电击」变成了掷骰子 —— 同一个学员连做两次
+        /// 可能得到相反的结论，而这个结论是会被当成表现来看的。
+        ///
+        /// 设定读自 CPRTrainingController，因为本类是运行时创建的（见 TryCreateRuntimeHost），
+        /// 自身的 [SerializeField] 字段根本不会出现在 Inspector 里，教员改不了。
+        /// 控制器是挂在场景上的，才是课程配置该放的地方。
+        /// </summary>
         private SimulatedRhythm PickSimulatedRhythm()
         {
-            bool shockable = alwaysAdviseShock || UnityEngine.Random.value < shockableRhythmProbability;
+            if (alwaysAdviseShock)
+            {
+                return SimulatedRhythm.VentricularFibrillation;
+            }
+
+            var controller = trainingController != null
+                ? trainingController
+                : FindObjectOfType<CPRTrainingController>();
+
+            // 拿不到控制器时也走固定，不要退回随机：
+            // 「配置丢了就自行求多福」比直接给个确定结果更难查。
+            if (controller == null)
+            {
+                Debug.LogWarning("[AEDTrainingRuntime] 找不到 CPRTrainingController，心律回退为室颤");
+                return SimulatedRhythm.VentricularFibrillation;
+            }
+
+            if (controller.aedRhythmMode == CPRTrainingController.AedRhythmMode.Fixed)
+            {
+                return controller.aedFixedRhythm;
+            }
+
+            bool shockable = UnityEngine.Random.value < controller.aedShockableProbability;
 
             if (shockable)
             {
@@ -3295,7 +3403,8 @@ namespace VRFirstAid.Equipment
             }
 
             SetButtonText(powerControlButton, LanguageManager.Get("\u5f00\u673a", "\u96fb\u6e90", "Power"));
-            SetButtonText(packageControlButton, LanguageManager.Get("\u53d6\u51fa\u8d34\u7247", "Pads", "Pads"));
+            // \u65e5\u6587\u9879\u539f\u672c\u5199\u7684\u662f "Pads"\uff08\u82f1\u6587\uff09\uff0c\u5207\u5230\u65e5\u8bed\u65f6\u8fd9\u4e2a\u6309\u94ae\u4e0d\u4f1a\u53d8
+            SetButtonText(packageControlButton, LanguageManager.Get("\u53d6\u51fa\u8d34\u7247", "\u30d1\u30c3\u30c9\u3092\u53d6\u308a\u51fa\u3059", "Pads"));
             SetButtonText(shockControlButton, LanguageManager.Get("\u7535\u51fb", "\u30b7\u30e7\u30c3\u30af", "Shock"));
             SetButtonText(returnControlButton, LanguageManager.Get("\u8fd4\u56de", "\u623b\u308b", "Back"));
             SetButtonText(exitControlButton, LanguageManager.Get("\u9000\u51fa", "\u7d42\u4e86", "Exit"));
@@ -3335,15 +3444,44 @@ namespace VRFirstAid.Equipment
             }
         }
 
+        /// <summary>
+        /// 当前指示文案的取值委托。语言切换时要按新语言重画同一条指示，
+        /// 所以记委托而不是记已经拼好的字符串。
+        /// </summary>
+        private System.Func<string> _instructionProvider;
+
+        private void UpdateInstructionOverlay(System.Func<string> provider)
+        {
+            _instructionProvider = provider;
+            ApplyInstructionOverlay();
+        }
+
         private void UpdateInstructionOverlay(string message)
+        {
+            // 已经本地化过的成品串（如评价结果），语言切换时由调用方重建
+            _instructionProvider = () => message;
+            ApplyInstructionOverlay();
+        }
+
+        private void ApplyInstructionOverlay()
         {
             EnsureInstructionOverlay();
 
-            if (instructionText != null)
+            if (instructionText != null && _instructionProvider != null)
             {
-                instructionText.text = message;
+                instructionText.text = _instructionProvider();
                 instructionText.transform.parent.gameObject.SetActive(true);
             }
+        }
+
+        /// <summary>
+        /// 语言切换时重画 AED 界面。之前这个类有 35 处 LanguageManager.Get，
+        /// 却一次都没订阅 OnLanguageChanged —— 面板一旦画出来就锁死在当时的语言。
+        /// </summary>
+        private void RefreshLocalizedUi()
+        {
+            UpdateControlButtons();
+            ApplyInstructionOverlay();
         }
 
         private void HideInstructionOverlay()

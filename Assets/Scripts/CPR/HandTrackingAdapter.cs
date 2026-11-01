@@ -60,6 +60,44 @@ namespace CPRSimulation
         public bool IsAnyHandTracking => _leftTracking || _rightTracking;
         public Vector3 ActiveHandPosition => _activeHandPosition;
 
+        /// <summary>
+        /// 左/右手各自的接触点世界坐标。追踪不到时返回 false。
+        ///
+        /// ActiveHandPosition 只给「当前活跃的那只手」，判不了双手同时做的动作。
+        /// 意识确认要分辨「拍的是左肩还是右肩」，必须按手区分，所以补这两个入口。
+        /// 取值顺序和 GetActiveHandPosition 一致：掌心代理优先，退回手部锚点。
+        /// </summary>
+        public bool TryGetLeftHandPosition(out Vector3 position)
+        {
+            return TryGetHandPosition(true, out position);
+        }
+
+        public bool TryGetRightHandPosition(out Vector3 position)
+        {
+            return TryGetHandPosition(false, out position);
+        }
+
+        private bool TryGetHandPosition(bool left, out Vector3 position)
+        {
+            position = Vector3.zero;
+
+            Transform palm = left ? GetLeftPalmTransform() : GetRightPalmTransform();
+            if (palm != null && palm.position.sqrMagnitude > 0.0001f)
+            {
+                position = palm.position;
+                return true;
+            }
+
+            Transform anchor = left ? _leftHandAnchor : _rightHandAnchor;
+            if (anchor != null && anchor.position.sqrMagnitude > 0.0001f)
+            {
+                position = anchor.position;
+                return true;
+            }
+
+            return false;
+        }
+
         private void Start()
         {
             if (autoFindOVRHands)

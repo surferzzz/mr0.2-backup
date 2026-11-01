@@ -15,4 +15,8 @@
     <meta-data android:name="com.oculus.supportedDevices" android:value="quest|quest2|questpro|quest3|quest3s" tools:replace="android:value" />
   </application>
   <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true" />
+  <!-- 意识确认步骤里检测「有没有出声呼唤」。只用来记录，不作为通过条件，
+       所以 required=false：设备没有录音输入时应用照常可装可用。 -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-feature android:name="android.hardware.microphone" android:required="false" />
 </manifest>

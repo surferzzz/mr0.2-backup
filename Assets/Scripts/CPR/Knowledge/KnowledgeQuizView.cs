@@ -49,6 +49,9 @@ namespace CPRSimulation.Knowledge
         private int _index;
         private int _correct;
         private bool _answered;
+        // 语言切换时要按新语言重画反馈行，所以记「答得对不对」而不是已拼好的字符串
+        private bool _lastAnswerCorrect;
+        private LanguageManager _languageHookedTo;
         private Action<QuizResult> _onFinished;
         private readonly List<string> _wrongTopics = new List<string>();
         private readonly List<string> _suggestedPractice = new List<string>();
@@ -56,6 +59,8 @@ namespace CPRSimulation.Knowledge
         /// <summary>开始一轮测验。bank 为 null 或没有题目时直接报错返回 false。</summary>
         public bool Begin(QuizBank bank, Action<QuizResult> onFinished)
         {
+            SubscribeToLanguageChanges();
+
             if (bank == null || bank.questions == null || bank.questions.Length == 0)
             {
                 Debug.LogError("[KnowledgeQuiz] 题库为空，无法开始测验");
@@ -214,6 +219,29 @@ namespace CPRSimulation.Knowledge
 
             _answered = false;
 
+            RenderQuestionTexts();
+
+            int count = q.options != null ? Mathf.Min(q.options.Length, MaxOptionButtons) : 0;
+            for (int i = 0; i < count; i++)
+            {
+                _optionButtons[i].interactable = true;
+                VRTrainingUIStyle.ApplyButton(_optionButtons[i], UIColorScheme.Primary);
+            }
+
+            _feedbackText.text = string.Empty;
+            _nextButton.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// 只写文字，不碰作答状态和按钮配色。ShowCurrent 和语言切换都走这里 ——
+        /// 切语言直接调 ShowCurrent 的话会把 _answered 重置，已经答过的题能再答一次。
+        /// </summary>
+        private void RenderQuestionTexts()
+        {
+            QuizQuestion q = Current;
+            if (q == null)
+                return;
+
             _progressText.text = LanguageManager.Get(
                 $"第 {_index + 1} / {_order.Count} 题",
                 $"問題 {_index + 1} / {_order.Count}",
@@ -230,12 +258,53 @@ namespace CPRSimulation.Knowledge
                     continue;
 
                 _optionLabels[i].text = q.options[i] != null ? q.options[i].Resolve() : "(missing option)";
-                _optionButtons[i].interactable = true;
-                VRTrainingUIStyle.ApplyButton(_optionButtons[i], UIColorScheme.Primary);
             }
+        }
 
-            _feedbackText.text = string.Empty;
-            _nextButton.gameObject.SetActive(false);
+        /// <summary>
+        /// 语言切换时重画。这个类有 7 处 LanguageManager.Get 却从没订阅过
+        /// OnLanguageChanged —— 题目画出来之后就锁死在当时的语言上。
+        /// </summary>
+        private void RefreshLocalizedUi()
+        {
+            if (_root == null || Current == null)
+                return;
+
+            RenderQuestionTexts();
+
+            if (_answered)
+                RenderFeedback(_lastAnswerCorrect);
+        }
+
+        private void OnEnable()
+        {
+            SubscribeToLanguageChanges();
+        }
+
+        private void OnDisable()
+        {
+            if (_languageHookedTo != null)
+            {
+                _languageHookedTo.OnLanguageChanged -= RefreshLocalizedUi;
+                _languageHookedTo = null;
+            }
+        }
+
+        /// <summary>
+        /// 本组件是运行时 AddComponent 的，OnEnable 时 LanguageManager 可能还没建好，
+        /// 所以 Begin() 里再补订阅一次。
+        /// </summary>
+        private void SubscribeToLanguageChanges()
+        {
+            LanguageManager manager = LanguageManager.Instance;
+            if (manager == null || ReferenceEquals(manager, _languageHookedTo))
+                return;
+
+            if (_languageHookedTo != null)
+                _languageHookedTo.OnLanguageChanged -= RefreshLocalizedUi;
+
+            _languageHookedTo = manager;
+            manager.OnLanguageChanged += RefreshLocalizedUi;
         }
 
         private void OnOptionClicked(int optionIndex)
@@ -277,6 +346,21 @@ namespace CPRSimulation.Knowledge
                     VRTrainingUIStyle.ApplyButton(_optionButtons[i], UIColorScheme.Danger);
             }
 
+            _lastAnswerCorrect = right;
+            RenderFeedback(right);
+            _nextButton.gameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// 反馈行和「下一题」按钮的文字。答题时和语言切换时共用，
+        /// 这样切语言不用重走 OnOptionClicked（那会重复计分）。
+        /// </summary>
+        private void RenderFeedback(bool right)
+        {
+            QuizQuestion q = Current;
+            if (q == null)
+                return;
+
             string head = right
                 ? LanguageManager.Get("正确", "正解", "Correct")
                 : LanguageManager.Get("不正确", "不正解", "Incorrect");
@@ -292,7 +376,6 @@ namespace CPRSimulation.Knowledge
             _nextLabel.text = last
                 ? LanguageManager.Get("查看结果", "結果を見る", "See results")
                 : LanguageManager.Get("下一题", "次の問題", "Next question");
-            _nextButton.gameObject.SetActive(true);
         }
 
         private void OnNextClicked()
@@ -324,8 +407,15 @@ namespace CPRSimulation.Knowledge
                           ? $"，需复习主题：{string.Join("、", result.wrongTopics)}"
                           : ""));
 
+            // 研究用ログ。_onFinished は画面側が握っているので、
+            // ログ採取はそれとは別口で受け取る。
+            OnQuizFinished?.Invoke(result);
+
             _onFinished?.Invoke(result);
         }
+
+        /// <summary>知識テストの結果。研究用のログ採取だけが購読する。</summary>
+        public static event Action<QuizResult> OnQuizFinished;
 
         /// <summary>把结果拼成给学员看的文字（含需复习的主题）。</summary>
         public string BuildResultText(QuizResult result)

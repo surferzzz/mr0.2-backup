@@ -33,12 +33,19 @@ public class EarthquakeTrainingDirector : MonoBehaviour
     //   需要高度 = 2 * 3.44 * tan(0.75°) ≈ 0.090 m => 90 px
     // 原来的 42px 只有 0.70°、按钮 38px 只有 0.63°，都远低于可读线。
     private const int WhiteboardFontSize = 90;
-    private const int WhiteboardFontMinSize = 60;   // 下限 60px ≈ 1.0°，Best Fit 收缩时的兜底
+    private const int WhiteboardFontMinSize = 52;   // 下限 52px ≈ 0.87°，Best Fit 收缩时的兜底
     public float frontOffset = 0.06f;
 
     private bool _earthquakeStarted;
     private bool _earthquakeFinished;
     private GameObject _trainingCanvasGO;
+
+    /// <summary>
+    /// 白板上当前显示的是哪一条状态文案。语言切换时要按同一条重新取文字，
+    /// 所以只能记状态、不能记已经拼好的字符串。
+    /// </summary>
+    private enum EarthquakeStatus { None, Ready, Shaking, Finished }
+    private EarthquakeStatus _status = EarthquakeStatus.None;
 
     private void Awake()
     {
@@ -51,6 +58,25 @@ public class EarthquakeTrainingDirector : MonoBehaviour
         StartCoroutine(InitializeAfterUiReady());
     }
 
+    private void OnDestroy()
+    {
+        CancelInvoke();
+
+        if (LanguageManager.Instance != null)
+            LanguageManager.Instance.OnLanguageChanged -= RefreshLocalizedUi;
+
+        if (startEarthquakeButton != null)
+            startEarthquakeButton.onClick.RemoveListener(StartEarthquake);
+    }
+
+    /// <summary>语言切换时把按钮标签和当前状态文案按新语言重新写一遍。</summary>
+    private void RefreshLocalizedUi()
+    {
+        SetButtonLabel(CPRTextLibrary.BtnStartEarthquake);
+        if (_status != EarthquakeStatus.None)
+            SetStatus(_status);
+    }
+
     private IEnumerator InitializeAfterUiReady()
     {
         yield return null;
@@ -61,15 +87,25 @@ public class EarthquakeTrainingDirector : MonoBehaviour
         if (earthquakePanel != null)
             earthquakePanel.SetActive(true);
 
-        SetButtonLabel("地震開始");
-        SetStatus("地震シミュレーション準備完了\nボタンを押して地震訓練を開始");
+        SetButtonLabel(CPRTextLibrary.BtnStartEarthquake);
+        SetStatus(EarthquakeStatus.Ready);
         StyleEarthquakeUi();
+
+        // 订阅放在这里而不是 Start()：LanguageManager 由 CPRTrainingController.Start()
+        // 创建，脚本执行顺序不保证它先跑，Start() 里取 Instance 可能还是 null。
+        // 这个协程已经让过一帧，此时一定建好了。
+        if (LanguageManager.Instance != null)
+            LanguageManager.Instance.OnLanguageChanged += RefreshLocalizedUi;
     }
 
     private void Update()
     {
+#if UNITY_EDITOR
+        // 快捷键只在编辑器里留着方便反复试流程。打包进头显后它是一个
+        // 谁也不知道存在、却能随时重新触发地震的隐藏入口，没有保留的理由。
         if (Input.GetKeyDown(editorTriggerKey))
             StartEarthquake();
+#endif
     }
 
     public void StartEarthquake()
@@ -94,7 +130,7 @@ public class EarthquakeTrainingDirector : MonoBehaviour
         if (startEarthquakeButton != null)
             startEarthquakeButton.interactable = false;
 
-        SetStatus("地震発生中\n姿勢を低く保ち、周囲の危険物に注意");
+        SetStatus(EarthquakeStatus.Shaking);
         StyleEarthquakeUi();
 
         earthquakeController.Play();
@@ -105,7 +141,7 @@ public class EarthquakeTrainingDirector : MonoBehaviour
     public void CompleteEarthquake()
     {
         _earthquakeFinished = true;
-        SetStatus("地震終了\n負傷者を発見、救命処置を開始します");
+        SetStatus(EarthquakeStatus.Finished);
 
         if (startEarthquakeButton != null)
             startEarthquakeButton.interactable = true;
@@ -194,9 +230,11 @@ public class EarthquakeTrainingDirector : MonoBehaviour
                 statusRect.anchorMin = new Vector2(0.5f, 0.5f);
                 statusRect.anchorMax = new Vector2(0.5f, 0.5f);
                 statusRect.pivot = new Vector2(0.5f, 0.5f);
-                statusRect.anchoredPosition = new Vector2(0f, 120f);
-                // 高度从 180 提到 260，容纳放大后的两行文字（90px × 2 行 × 1.2 行距 ≈ 216）
-                statusRect.sizeDelta = new Vector2(1280f, 260f);
+                statusRect.anchoredPosition = new Vector2(0f, 150f);
+                // 说明文案从 2 行加到 3 行（讲清楚「这是什么训练、按下去会发生什么」），
+                // 按最小字号 52px × 4 行（含换行）× 1.2 行距 ≈ 250 留出余量，
+                // 同时加宽到 1480 减少中途折行。面板半高 480，顶边 315 仍在板内。
+                statusRect.sizeDelta = new Vector2(1480f, 330f);
                 statusRect.localScale = Vector3.one;
             }
 
@@ -222,8 +260,9 @@ public class EarthquakeTrainingDirector : MonoBehaviour
                 buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
                 buttonRect.pivot = new Vector2(0.5f, 0.5f);
                 buttonRect.anchoredPosition = new Vector2(0f, -135f);
-                // 放大以容纳 90px 标签（内边距上下各 8）
-                buttonRect.sizeDelta = new Vector2(620f, 150f);
+                // 标签从「地震開始」变成「訓練開始（地震想定）」，
+                // 11 字 × 90px ≈ 990，原来的 620 宽会把字压到最小号。
+                buttonRect.sizeDelta = new Vector2(1060f, 160f);
                 buttonRect.localScale = Vector3.one;
             }
 
@@ -298,19 +337,21 @@ public class EarthquakeTrainingDirector : MonoBehaviour
             text.text = label;
     }
 
-    private void SetStatus(string message)
+    private void SetStatus(EarthquakeStatus status)
     {
+        _status = status;
+
+        string message = status switch
+        {
+            EarthquakeStatus.Ready    => CPRTextLibrary.EarthquakeReady,
+            EarthquakeStatus.Shaking  => CPRTextLibrary.EarthquakeShaking,
+            EarthquakeStatus.Finished => CPRTextLibrary.EarthquakeFinished,
+            _                         => string.Empty
+        };
+
         if (statusText != null)
             statusText.text = message;
 
         Debug.Log("[EarthquakeTrainingDirector] " + message.Replace('\n', ' '));
-    }
-
-    private void OnDestroy()
-    {
-        CancelInvoke();
-
-        if (startEarthquakeButton != null)
-            startEarthquakeButton.onClick.RemoveListener(StartEarthquake);
     }
 }

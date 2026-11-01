@@ -5,6 +5,9 @@ using System.Collections;
 using TMPro;
 using CPRSimulation;
 using CPRSimulation.Knowledge;
+// AED 的心律枚举定义在这里。AEDTrainingRuntime 反过来也 using 本命名空间，
+// 两者互相引用 —— 同一个程序集内合法，不构成循环依赖。
+using VRFirstAid.Equipment;
 
 namespace CPRSimulation.Game
 {
@@ -69,7 +72,49 @@ namespace CPRSimulation.Game
         [Header("\u8bbe\u7f6e")]
         public float introDuration = 3f;
         public float fallAnimationDelay = 1f;
+
+        [Tooltip("纯按压训练时的目标次数。注意：开启下方 useVentilationCycles 后这个值被忽略，" +
+                 "实际目标 = ventilationCyclesTarget × compressionsPerCycle。")]
         public int targetCompressions = 30;
+
+        [Header("AED 心律设定")]
+        [Tooltip("AED 分析出的心律怎么定。\n" +
+                 "Fixed：按下方 aedFixedRhythm 固定（推荐）。同一堂课所有学员拿到相同场景，成绩才可比。\n" +
+                 "Random：按 aedShockableProbability 随机抽。这是以前的行为 —— " +
+                 "同一个学员连做两次可能得到相反的「是否建议电击」结论。")]
+        public AedRhythmMode aedRhythmMode = AedRhythmMode.Fixed;
+
+        [Tooltip("aedRhythmMode = Fixed 时使用的心律。室颤是最典型的可电击训练场景。")]
+        public AEDTrainingRuntime.SimulatedRhythm aedFixedRhythm =
+            AEDTrainingRuntime.SimulatedRhythm.VentricularFibrillation;
+
+        [Tooltip("aedRhythmMode = Random 时，判定为可电击心律（室颤/无脉室速）的概率。")]
+        [Range(0f, 1f)]
+        public float aedShockableProbability = 0.65f;
+
+        [Header("人工呼吸（30:2）")]
+        [Tooltip("开启后按每 30 次按压 + 2 次人工呼吸的循环进行，这是无高级气道时成人 CPR 的标准比例。" +
+                 "关闭则退回纯按压训练（targetCompressions 次后结束）。")]
+        public bool useVentilationCycles = true;
+
+        [Tooltip("一个循环里的按压次数。成人标准为 30。")]
+        public int compressionsPerCycle = 30;
+
+        [Tooltip("一个循环里的人工呼吸次数。成人标准为 2。")]
+        public int breathsPerCycle = 2;
+
+        [Tooltip("训练要完成几个 30:2 循环。指南在实操考核里常用 5 个循环（约 2 分钟），" +
+                 "这里默认 2 个，教员可按课时调整。")]
+        public int ventilationCyclesTarget = 2;
+
+        /// <summary>
+        /// 本次训练实际要完成的按压总数。开了 30:2 就是「循环数 × 每循环按压数」，
+        /// 否则还是原来的 targetCompressions。
+        /// </summary>
+        private int EffectiveTargetCompressions =>
+            useVentilationCycles
+                ? Mathf.Max(1, ventilationCyclesTarget) * Mathf.Max(1, compressionsPerCycle)
+                : targetCompressions;
         public string mainMenuSceneName = "MainMenu";
         [Tooltip("\u8df3\u8fc7\u7ffb\u8f6c\u4ea4\u4e92\uff0c\u5012\u5730\u540e\u76f4\u63a5\u5f00\u59cb CPR\uff08\u9632\u6b62\u7ffb\u8f6c\u65f6\u6389\u5730\u4e0b\uff09")]
         public bool skipFlipInteraction = true;
@@ -91,7 +136,17 @@ namespace CPRSimulation.Game
         [Header("CPR 检测范围（运行时创建检测区时使用，可在此调整）")]
         [Tooltip("检测区相对胸骨(Spine2)的局部偏移（已按标记球校准到胸口）")]
         public Vector3 detectionLocalOffset = new Vector3(-0.0218f, 0.0148f, 0.0702f);
-        [Tooltip("检测区可视球体的局部缩放（仅影响外观大小）")]
+        [Tooltip("是否显示检测区那个红色半透明球体。\n" +
+                 "关闭后只是不渲染 —— SphereCollider(isTrigger) 和距离备用检测都照常工作，\n" +
+                 "按压检测不受影响。\n\n" +
+                 "默认关闭的原因：偏移是按站立姿态调的（骨骼局部 +Z 指向体前方，" +
+                 "7cm 刚好嵌在胸腔内），患者倒地后骨骼跟着转、+Z 指向天花板，" +
+                 "球心正好落在皮肤表面上，上半部分就露在体外了。")]
+        public bool showDetectionZone = false;
+
+        [Tooltip("检测区可视球体的局部缩放（仅影响外观大小）。\n" +
+                 "注意不要用它来修「球露出来」—— 改 detectionLocalOffset 会移动 chestSurface，" +
+                 "而深度基准是 chestSurface.position + 悬停高度算出来的，偏移动 2cm 深度就整体偏 2cm。")]
         public Vector3 detectionZoneScale = new Vector3(0.2f, 0.08f, 0.2f);
         [Tooltip("触发检测的球形碰撞体半径（局部值，×0.2≈世界半径米；0.5≈世界10cm）")]
         public float detectionTriggerRadius = 0.5f;
@@ -111,11 +166,21 @@ namespace CPRSimulation.Game
             Quiz
         }
 
+        /// <summary>AED 分析心律的决定方式。</summary>
+        public enum AedRhythmMode
+        {
+            /// <summary>按 aedFixedRhythm 固定。教学场景的默认选择。</summary>
+            Fixed,
+            /// <summary>按概率随机。需要让学员遇到不同场景时才用。</summary>
+            Random
+        }
+
         public enum TrainingPhase
         {
             Intro,
             WaitingStart,
             PatientFalling,
+            CheckingResponse,
             CallingHelp,
             AEDInProgress,
             Quiz,
@@ -127,6 +192,44 @@ namespace CPRSimulation.Game
         public TrainingMode SelectedTrainingMode => selectedTrainingMode;
         public bool IsAEDTrainingSelected => UsesAedFlow();
         public const string RequestedTrainingModePrefKey = "CPRTraining.RequestedTrainingMode";
+
+        // ── 研究用の読み取り口 ──
+        // 統計そのものは完成画面のテキスト組み立てにしか使われていなかったので、
+        // 外（TrainingDataLogger）から読めるようにしただけ。計算はいっさい変えていない。
+        public CPRPressDetector PressDetector => pressDetector;
+        public int TargetCompressions => EffectiveTargetCompressions;
+        public int CompressionCountTotal => compressionCount;
+        public int CompressionSamples => _compressionSamples;
+        public int RateSamples => _rateSamples;
+        public float SumDepthCm => _sumDepthCm;
+        public float SumRateBpm => _sumRateBpm;
+        public int GoodDepthSamples => _goodDepthSamples;
+        public int GoodRateSamples => _goodRateSamples;
+        public int GoodCombinedSamples => _goodCombinedSamples;
+        public int TooShallowSamples => _tooShallowSamples;
+        public int TooDeepSamples => _tooDeepSamples;
+        public int TooSlowSamples => _tooSlowSamples;
+        public int TooFastSamples => _tooFastSamples;
+        public int FullRecoilSamples => _fullRecoilSamples;
+        public float SumRecoilDeficitCm => _sumRecoilDeficitCm;
+        public int OnTargetSamples => _onTargetSamples;
+        public float SumOffsetCm => _sumOffsetCm;
+        public float TotalHandsOffSeconds => _totalHandsOffSeconds;
+        public float LongestHandsOffSeconds => _longestHandsOffSeconds;
+        public int InterruptionCount => _interruptionCount;
+        public float InterruptionThresholdSeconds => InterruptionThresholdSec;
+        public int BestQualityStreak => _bestQualityStreak;
+        public float ResponseCheckSeconds => _responseCheckSeconds;
+        public bool ResponseCheckVoiceHeard => _responseCheckVoiceHeard;
+        public bool ResponseCheckSkipped => _responseCheckSkipped;
+        public int VentilationCyclesDone => _ventilationCyclesDone;
+        public int TotalBreathsGiven => _totalBreathsGiven;
+        public float LongestVentilationPauseSec => _longestVentilationPauseSec;
+        public float SessionDurationSeconds =>
+            trainingStartTime > 0f ? Time.time - trainingStartTime : 0f;
+        public float CprPhaseStartTime => _cprPhaseStartTime;
+        public float ChestCompressionFraction => CalculateChestCompressionFraction(Time.time);
+        public bool AedFlowIncludedInResult => RequiresAedFlowForResult();
 
         public static void SetRequestedTrainingMode(TrainingMode mode)
         {
@@ -142,6 +245,9 @@ namespace CPRSimulation.Game
         public static event System.Action<TrainingPhase> OnPhaseChanged;
         public static event System.Action OnPatientFell;
         public static event System.Action OnCPRStarted;
+        /// <summary>計測セッションの開始／終了。研究用のログ採取だけが購読する。</summary>
+        public static event System.Action<CPRTrainingController> OnSessionStarted;
+        public static event System.Action<CPRTrainingController> OnSessionCompleted;
         public static event System.Action<int, int> OnCompressionProgress; // (current, target)
 
         private float trainingStartTime;
@@ -160,6 +266,24 @@ namespace CPRSimulation.Game
         private int _tooFastSamples;
         private int _currentQualityStreak;
         private int _bestQualityStreak;
+
+        // ── 指南要求但之前完全没统计的三项 ──
+        // 回弹：检测器早就测出来了（LastRecoilIncomplete），但一分都不占，
+        // 于是「整个人压在胸口不松手」也能拿满分。
+        private int _fullRecoilSamples;
+        private float _sumRecoilDeficitCm;
+        // 按压位置：之前只有「手在不在触发盒里」的布尔判断，盒子 15cm 见方，
+        // 压到剑突或肋骨照样算数。
+        private int _onTargetSamples;
+        private float _sumOffsetCm;
+        // 中断 / 胸骨压迫比(CCF)：指南要求中断 <10 秒、CCF 尽量 >60%。之前零统计。
+        private float _cprPhaseStartTime;
+        private float _lastCompressionAtTime;
+        private float _totalHandsOffSeconds;
+        private float _longestHandsOffSeconds;
+        private int _interruptionCount;
+        /// <summary>超过这个秒数的按压间隔才算「中断」，而不是正常的按压节奏间隔。</summary>
+        private const float InterruptionThresholdSec = 3f;
         private bool lockPatientPosition = false;
         private Vector3 lockedPosition;
 
@@ -176,8 +300,15 @@ namespace CPRSimulation.Game
         private const float MergedCprRateBarWidth = 520f;
         private const float MergedCprMinRateDisplay = 60f;
         private const float MergedCprMaxRateDisplay = 150f;
-        private const float FixedCprHudHeightAboveChest = 0.82f;
-        private const float FixedCprHudDistanceTowardViewer = 0.38f;
+        // CPR HUD 摆位：放在患者身体的**另一侧**（背离学员那一侧），板面与躯干平行。
+        //
+        // 板面平行于躯干，意味着它 0.92m 的宽度是沿着身体铺开的，而不是横切过去。
+        // 之前用 billboard（始终正对学员）时，面板会斜着穿过患者身体 ——
+        // 这正是「説明用の画面が倒れている人と干渉」的几何成因。
+        //
+        // 高度相对胸部检测区（实测 y≈0.25），不写死世界 Y，房间整体挪动时也成立。
+        private const float CprHudHeightAboveChest = 0.45f;
+        private const float CprHudSideDistance = 0.62f;
         private bool _mergedCprHudBuilt;
         private TMP_Text _mergedCprCoachTextRuntime;
         private TMP_Text _mergedCprDepthValueRuntime;
@@ -205,8 +336,12 @@ namespace CPRSimulation.Game
             CacheUIRootInitialTransform();
             EnsureUIRootActive();
             SetupButtons();
+            LocalizedUI.Clear();            // 静态表跨场景存活，进场先清掉上一场景的残留登记
+            BindStaticLocalizedTexts();     // 登记场景里固定文案的文本控件
             BuildLanguageSelectButtons();   // 在开始面板上创建语言切换按钮
+            BuildControlsGuidePanel();      // 操作说明面板（进场自动弹一次，之后可手动打开）
             SetupCPRDetector();
+            BuildPatientPlacementUI();      // 必须在 SetupCPRDetector 之后：要拿到 pressDetector 才能一起搬
             EnsureHapticController();
             EnsureAudio();
 
@@ -300,6 +435,8 @@ namespace CPRSimulation.Game
             var placer = _uiRoot.GetComponent<CPRResultPanelPlacer>();
             if (placer != null)
                 placer.enabled = false;
+
+            DisableWorkspaceGuard(_uiRoot);
         }
 
         private void EnsureUIRootActive()
@@ -450,6 +587,346 @@ namespace CPRSimulation.Game
             Debug.Log("[CPRTraining] Language buttons created");
         }
 
+        // ─── 操作说明面板 ────────────────────────────────────────────────
+        private GameObject _controlsGuidePanel;
+        private TMP_Text _controlsGuideTitleText;
+        private TMP_Text _controlsGuideBodyText;
+        private Button _controlsGuideOkButton;
+        private Button _controlsGuideOpenButton;
+
+        /// <summary>
+        /// 开场操作说明。手部追踪和手柄两条输入路径本来就都能用，
+        /// 但界面上一个字都没写，学员拿到头显不知道从哪儿下手。
+        /// 这里建一个可反复打开的说明面板，进场时自动弹一次。
+        /// </summary>
+        private void BuildControlsGuidePanel()
+        {
+            Canvas canvas = null;
+            if (startTrainingPanel != null)
+                canvas = startTrainingPanel.GetComponentInParent<Canvas>();
+            if (canvas == null)
+                canvas = FindObjectOfType<Canvas>();
+            if (canvas == null)
+                return;
+
+            // ── 说明面板本体 ──
+            _controlsGuidePanel = new GameObject("ControlsGuidePanel", typeof(RectTransform), typeof(Image));
+            _controlsGuidePanel.transform.SetParent(canvas.transform, false);
+            _controlsGuidePanel.transform.SetAsLastSibling();
+
+            var panelRt = _controlsGuidePanel.GetComponent<RectTransform>();
+            panelRt.anchorMin = panelRt.anchorMax = new Vector2(0.5f, 0.5f);
+            panelRt.pivot = new Vector2(0.5f, 0.5f);
+            panelRt.anchoredPosition = Vector2.zero;
+            panelRt.sizeDelta = new Vector2(1180f, 760f);
+
+            var bg = _controlsGuidePanel.GetComponent<Image>();
+            bg.color = new Color(0.02f, 0.045f, 0.06f, 0.94f);
+            VRTrainingUIStyle.ApplyPanel(_controlsGuidePanel, true);
+
+            _controlsGuideTitleText = EnsureRuntimeText(
+                _controlsGuidePanel.transform, "ControlsGuideTitle",
+                new Vector2(0f, 300f), new Vector2(1080f, 90f),
+                52, TextAnchor.MiddleCenter, UIColorScheme.TextPrimary);
+
+            // 正文左对齐：分条目的说明居中读起来费劲，行首对不齐。
+            _controlsGuideBodyText = EnsureRuntimeText(
+                _controlsGuidePanel.transform, "ControlsGuideBody",
+                new Vector2(0f, -10f), new Vector2(1080f, 520f),
+                30, TextAnchor.UpperLeft, UIColorScheme.TextPrimary);
+
+            _controlsGuideOkButton = CreateGuideButton(
+                _controlsGuidePanel.transform, "ControlsGuideOkButton",
+                new Vector2(0f, -320f), new Vector2(320f, 84f),
+                UIColorScheme.Success, HideControlsGuide);
+
+            _controlsGuidePanel.SetActive(false);
+
+            // ── 重新打开用的小按钮，挂在语言按钮那一排下面 ──
+            _controlsGuideOpenButton = CreateGuideButton(
+                canvas.transform, "ControlsGuideOpenButton",
+                new Vector2(0f, -140f), new Vector2(280f, 60f),
+                UIColorScheme.Info, ShowControlsGuide);
+
+            var openRt = _controlsGuideOpenButton.GetComponent<RectTransform>();
+            openRt.anchorMin = openRt.anchorMax = new Vector2(0.5f, 1f);
+            openRt.pivot = new Vector2(0.5f, 1f);
+            openRt.anchoredPosition = new Vector2(0f, -140f);
+
+            RefreshControlsGuideTexts();
+        }
+
+        /// <summary>说明面板用的按钮：TMP 标签，避免 legacy Text 没字体渲染不出来。</summary>
+        private Button CreateGuideButton(Transform parent, string name, Vector2 pos, Vector2 size,
+                                         Color color, UnityEngine.Events.UnityAction onClick)
+        {
+            var btnGo = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+            btnGo.transform.SetParent(parent, false);
+
+            var rt = btnGo.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = pos;
+
+            var img = btnGo.GetComponent<Image>();
+            img.color = color;
+
+            var btn = btnGo.GetComponent<Button>();
+            btn.targetGraphic = img;
+            btn.onClick.AddListener(onClick);
+
+            var label = EnsureRuntimeText(btnGo.transform, "Label", Vector2.zero,
+                                          new Vector2(size.x - 16f, size.y - 8f),
+                                          28, TextAnchor.MiddleCenter, UIColorScheme.TextPrimary);
+            var labelRt = label.rectTransform;
+            labelRt.anchorMin = Vector2.zero;
+            labelRt.anchorMax = Vector2.one;
+            labelRt.offsetMin = new Vector2(8f, 4f);
+            labelRt.offsetMax = new Vector2(-8f, -4f);
+
+            VRTrainingUIStyle.ApplyButton(btn, color);
+            return btn;
+        }
+
+        public void ShowControlsGuide()
+        {
+            if (_controlsGuidePanel == null)
+                return;
+
+            RefreshControlsGuideTexts();
+            _controlsGuidePanel.SetActive(true);
+            _controlsGuidePanel.transform.SetAsLastSibling();
+        }
+
+        public void HideControlsGuide()
+        {
+            if (_controlsGuidePanel != null)
+                _controlsGuidePanel.SetActive(false);
+        }
+
+        private void RefreshControlsGuideTexts()
+        {
+            if (_controlsGuideTitleText != null)
+                _controlsGuideTitleText.text = CPRTextLibrary.ControlsGuideTitle;
+
+            if (_controlsGuideBodyText != null)
+                _controlsGuideBodyText.text = CPRTextLibrary.ControlsGuideBody;
+
+            SetGuideButtonLabel(_controlsGuideOkButton, CPRTextLibrary.BtnGotIt);
+            SetGuideButtonLabel(_controlsGuideOpenButton, CPRTextLibrary.BtnControlsGuide);
+        }
+
+        private void SetGuideButtonLabel(Button btn, string label)
+        {
+            if (btn == null)
+                return;
+
+            var text = btn.GetComponentInChildren<TMP_Text>(true);
+            if (text != null)
+                text.text = label;
+        }
+
+        // ─── 患者放置 ────────────────────────────────────────────────────
+        private PatientPlacement _patientPlacement;
+        private GameObject _placementPanel;
+        private TMP_Text _placementTitleText;
+        private TMP_Text _placementBodyText;
+        private Button _placementConfirmButton;
+        private Button _placementCancelButton;
+        private Button _placementOpenButton;
+
+        /// <summary>
+        /// 患者放置流程。之前患者钉死在世界原点，用户真实房间里那个位置可能有家具，
+        /// 于是「压不下去」。这里给一个把患者搬到空地上的步骤。
+        /// </summary>
+        /// <summary>
+        /// 登记场景里那几个固定文案的文本控件。按子物体名精确查找，
+        /// 找不到就跳过 —— 和以前的模糊匹配不同，漏了哪一个在这里一眼能看见。
+        /// </summary>
+        private void BindStaticLocalizedTexts()
+        {
+            // IntroText：以前只在 currentPhase == Intro 时刷新，而 Intro 只有 3 秒，
+            // 之后再切语言它就一直停在场景里烘死的日文上。
+            BindLocalizedChild(introPanel, "IntroText", () => CPRTextLibrary.Welcome);
+
+            // CompleteTitle：CompletionTitle 当前返回空白（结果正文自带标题行），
+            // 登记它是为了让「这一处归本地化管」写在代码里，而不是靠名字里恰好含
+            // completetitle 被 CompleteTraining 里那段匹配捡到。
+            BindLocalizedChild(completionPanel, "CompleteTitle", () => CPRTextLibrary.CompletionTitle);
+
+            // phaseText / instructionText 不登记：RefreshAllTrainingUI 前两步已经
+            // 显式写过，而且 instructionText 在训练中承载实时数据，重放会把它覆盖掉。
+        }
+
+        private void BindLocalizedChild(GameObject panel, string childName, System.Func<string> provider)
+        {
+            if (panel == null)
+                return;
+
+            GameObject child = FindChildGameObject(panel.transform, childName);
+            if (child == null)
+            {
+                Debug.LogWarning($"[CPRTraining] 未找到待本地化的文本「{panel.name}/{childName}」，" +
+                                 "它会停在场景里烘死的那一版语言上。");
+                return;
+            }
+
+            LocalizedUI.BindGraphic(child, provider);
+        }
+
+        private void CachePatientStandPose()
+        {
+            if (patientModel == null)
+                return;
+
+            patientStandLocalPosition = patientModel.transform.localPosition;
+            patientStandLocalRotation = patientModel.transform.localRotation;
+        }
+
+        private void BuildPatientPlacementUI()
+        {
+            Canvas canvas = null;
+            if (startTrainingPanel != null)
+                canvas = startTrainingPanel.GetComponentInParent<Canvas>();
+            if (canvas == null)
+                canvas = FindObjectOfType<Canvas>();
+            if (canvas == null)
+                return;
+
+            _patientPlacement = FindObjectOfType<PatientPlacement>();
+            if (_patientPlacement == null)
+            {
+                var host = new GameObject("PatientPlacement");
+                _patientPlacement = host.AddComponent<PatientPlacement>();
+            }
+
+            // 患者还没找到就别建 UI，免得给一个按下去没反应的按钮。
+            if (!_patientPlacement.EnsureRig(patientModel, pressDetector))
+            {
+                Debug.LogWarning("[CPRTraining] 未找到患者模型，跳过放置功能。");
+                Destroy(_patientPlacement.gameObject);
+                _patientPlacement = null;
+                return;
+            }
+
+            // EnsureRig 给患者换了父节点，之前记下的局部站姿是按「无父节点」算的，
+            // 现在要按新的父节点重新记一遍。
+            CachePatientStandPose();
+
+            _placementPanel = new GameObject("PlacementPanel", typeof(RectTransform), typeof(Image));
+            _placementPanel.transform.SetParent(canvas.transform, false);
+            _placementPanel.transform.SetAsLastSibling();
+
+            var panelRt = _placementPanel.GetComponent<RectTransform>();
+            panelRt.anchorMin = panelRt.anchorMax = new Vector2(0.5f, 0.5f);
+            panelRt.pivot = new Vector2(0.5f, 0.5f);
+            // 面板往上抬：放置时用户要低头看地面，面板压在视野中央会挡住落点。
+            panelRt.anchoredPosition = new Vector2(0f, 190f);
+            panelRt.sizeDelta = new Vector2(1100f, 520f);
+
+            _placementPanel.GetComponent<Image>().color = new Color(0.02f, 0.045f, 0.06f, 0.90f);
+            VRTrainingUIStyle.ApplyPanel(_placementPanel, true);
+
+            _placementTitleText = EnsureRuntimeText(
+                _placementPanel.transform, "PlacementTitle",
+                new Vector2(0f, 180f), new Vector2(1000f, 80f),
+                48, TextAnchor.MiddleCenter, UIColorScheme.TextPrimary);
+
+            _placementBodyText = EnsureRuntimeText(
+                _placementPanel.transform, "PlacementBody",
+                new Vector2(0f, -10f), new Vector2(1000f, 290f),
+                28, TextAnchor.UpperLeft, UIColorScheme.TextPrimary);
+
+            _placementConfirmButton = CreateGuideButton(
+                _placementPanel.transform, "PlacementConfirmButton",
+                new Vector2(-180f, -200f), new Vector2(300f, 80f),
+                UIColorScheme.Success, ConfirmPatientPlacement);
+
+            _placementCancelButton = CreateGuideButton(
+                _placementPanel.transform, "PlacementCancelButton",
+                new Vector2(180f, -200f), new Vector2(300f, 80f),
+                UIColorScheme.PrimaryDark, CancelPatientPlacement);
+
+            _placementPanel.SetActive(false);
+
+            // 入口按钮放在语言按钮和「操作说明」下面一排
+            _placementOpenButton = CreateGuideButton(
+                canvas.transform, "PlacementOpenButton",
+                Vector2.zero, new Vector2(340f, 60f),
+                UIColorScheme.Warning, BeginPatientPlacement);
+
+            var openRt = _placementOpenButton.GetComponent<RectTransform>();
+            openRt.anchorMin = openRt.anchorMax = new Vector2(0.5f, 1f);
+            openRt.pivot = new Vector2(0.5f, 1f);
+            openRt.anchoredPosition = new Vector2(0f, -212f);
+
+            RefreshPlacementTexts();
+        }
+
+        public void BeginPatientPlacement()
+        {
+            if (_patientPlacement == null || _placementPanel == null)
+                return;
+
+            // 放置期间把模式选择面板收起来：它挡在视野中央，用户没法低头看地面。
+            if (startTrainingPanel != null) startTrainingPanel.SetActive(false);
+            if (introPanel != null) introPanel.SetActive(false);
+            SetSelectionChromeVisible(false);
+            HideControlsGuide();
+
+            RefreshPlacementTexts();
+            _placementPanel.SetActive(true);
+            _placementPanel.transform.SetAsLastSibling();
+            _patientPlacement.BeginPlacement();
+        }
+
+        private void ConfirmPatientPlacement()
+        {
+            if (_patientPlacement != null)
+                _patientPlacement.ConfirmPlacement();
+            EndPatientPlacement();
+        }
+
+        private void CancelPatientPlacement()
+        {
+            if (_patientPlacement != null)
+                _patientPlacement.CancelPlacement();
+            EndPatientPlacement();
+        }
+
+        private void EndPatientPlacement()
+        {
+            if (_placementPanel != null)
+                _placementPanel.SetActive(false);
+
+            if (introPanel != null) introPanel.SetActive(true);
+            if (startTrainingPanel != null) startTrainingPanel.SetActive(true);
+            SetSelectionChromeVisible(true);
+        }
+
+        /// <summary>语言按钮 / 操作说明入口 / 放置入口，这三个是同一组选择界面外围控件。</summary>
+        private void SetSelectionChromeVisible(bool visible)
+        {
+            if (_languageSelectPanel != null)
+                _languageSelectPanel.SetActive(visible);
+            if (_controlsGuideOpenButton != null)
+                _controlsGuideOpenButton.gameObject.SetActive(visible);
+            if (_placementOpenButton != null)
+                _placementOpenButton.gameObject.SetActive(visible);
+        }
+
+        private void RefreshPlacementTexts()
+        {
+            if (_placementTitleText != null)
+                _placementTitleText.text = CPRTextLibrary.PlacementTitle;
+            if (_placementBodyText != null)
+                _placementBodyText.text = CPRTextLibrary.PlacementBody;
+
+            SetGuideButtonLabel(_placementConfirmButton, CPRTextLibrary.BtnConfirmPlacement);
+            SetGuideButtonLabel(_placementCancelButton, CPRTextLibrary.BtnCancelPlacement);
+            SetGuideButtonLabel(_placementOpenButton, CPRTextLibrary.BtnPlacePatient);
+        }
+
         private void UpdateLangButtonHighlight()
         {
             if (LanguageManager.Instance == null) return;
@@ -510,54 +987,19 @@ namespace CPRSimulation.Game
             SetButtonLabel(backTrainingButton, GetBackButtonLabel());
             SetButtonLabel(exitTrainingButton, GetExitButtonLabel());
             SetButtonLabel(hudExitButton, CPRTextLibrary.BtnExit);
+            RefreshControlsGuideTexts();
+            RefreshPlacementTexts();
             if (_knowledgeQuizText != null)
                 _knowledgeQuizText.text = GetQuizInstruction();
             if (_storyCallHelpText != null)
                 _storyCallHelpText.text = GetCallingHelpInstruction();
 
-            // 4. 开始面板内的「准备就绪」类状态文字（非按钮内的Text）
-            if (startTrainingPanel != null && currentPhase == TrainingPhase.WaitingStart)
-            {
-                bool found = false;
-                var texts = startTrainingPanel.GetComponentsInChildren<Text>(true);
-                foreach (var t in texts)
-                {
-                    if (t.GetComponentInParent<Button>() != null) continue;
-                    string n = t.gameObject.name.ToLower();
-                    if (n.Contains("title") || n.Contains("status") || n.Contains("ready") || n.Contains("phase")
-                        || n.Contains("label") || n.Contains("main") || n.Contains("header"))
-                    {
-                        t.text = GetTrainingModeSelectionTitleV2();
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found && texts.Length > 0)
-                {
-                    foreach (var t in texts)
-                    {
-                        if (t.GetComponentInParent<Button>() != null) continue;
-                            t.text = GetTrainingModeSelectionTitleV2();
-                        break;  // 只改第一个匹配的
-                    }
-                }
-            }
-
-            // 5. 介绍面板的欢迎语
-            if (introPanel != null && currentPhase == TrainingPhase.Intro)
-            {
-                var texts = introPanel.GetComponentsInChildren<Text>(true);
-                foreach (var t in texts)
-                {
-                    if (t.GetComponentInParent<Button>() != null) continue;
-                    string n = t.gameObject.name.ToLower();
-                    if (n.Contains("title") || n.Contains("welcome") || n.Contains("intro"))
-                    {
-                        t.text = CPRTextLibrary.Welcome;
-                        break;
-                    }
-                }
-            }
+            // 4. 场景里那些固定文案的文本控件。
+            //    以前这里是按 GameObject 名字模糊匹配去猜的（名字含 title/status/ready/…），
+            //    猜不中就永远停在旧语言 —— CompleteTitle 的「トレーニング完了！」
+            //    在英文和中文界面里一直没变过，就是因为既没被匹配上也不在刷新范围内。
+            //    现在改成登记式：BindStaticLocalizedTexts() 里登记过的一律重放。
+            LocalizedUI.RefreshAll();
 
             Debug.Log("[CPRTraining] UI 文字已按当前语言刷新");
         }
@@ -580,6 +1022,7 @@ namespace CPRSimulation.Game
                 TrainingPhase.Intro          => CPRTextLibrary.Welcome,
                 TrainingPhase.WaitingStart   => GetTrainingModeSelectionInstructionV2(),
                 TrainingPhase.PatientFalling => CPRTextLibrary.PatientFell,
+                TrainingPhase.CheckingResponse => CPRTextLibrary.ResponseCheckTitle,
                 TrainingPhase.CallingHelp    => GetCallingHelpInstruction(),
                 TrainingPhase.AEDInProgress  => ResolveSelectedTrainingMode() == TrainingMode.Story ? GetStoryAEDPhaseInstruction() : GetAEDPhaseInstruction(),
                 TrainingPhase.Quiz           => GetQuizInstruction(),
@@ -1254,6 +1697,11 @@ namespace CPRSimulation.Game
 
         private void Update()
         {
+            // 通气停顿的计时要一直走：把「已经停了几秒」摆在学员面前，
+            // 才教得会「中断要压在 10 秒以内」这件事。
+            if (_awaitingVentilation)
+                RefreshVentilationText();
+
             // 每帧强制锁定患者位置（防止掉地下）
             if (lockPatientPosition && patientModel != null)
             {
@@ -1310,7 +1758,7 @@ namespace CPRSimulation.Game
                 bool handIn = pressDetector.IsHandInContact;
                 if (instructionText != null)
                     instructionText.text = CPRTextLibrary.CPRProgress(
-                        compressionCount, targetCompressions, depth, rate, handIn);
+                        compressionCount, EffectiveTargetCompressions, depth, rate, handIn);
                 UpdateMergedCprHud(depth, rate, handIn);
 
                 // 实时触觉保底：深度> 0.5cm 就触发震动（不等 OnCompressionComplete）
@@ -1332,8 +1780,11 @@ namespace CPRSimulation.Game
         // 此方法已由CPRTextLibrary + LanguageManager 替代，保留空方法不影响调用栈
         private void ReplaceUITextToJapanese() { }
 
-        private Vector3 patientStandPosition;
-        private Quaternion patientStandRotation;
+        // 站立初始位姿记的是「相对父节点」的局部位姿，不是世界位姿。
+        // 患者被 PatientPlacement 搬走之后，世界位姿就不再是原来那个了；
+        // 记世界值会让「再来一次」把患者弹回用户放置之前的位置。
+        private Vector3 patientStandLocalPosition;
+        private Quaternion patientStandLocalRotation;
 
         // 摄像头初始位置（用于「再来一次」时恢复）
         private Vector3 _initialCameraRigPosition;
@@ -1386,8 +1837,7 @@ namespace CPRSimulation.Game
             // 面向相机
             patientModel.transform.rotation = Quaternion.Euler(0, 180, 0);
             patientModel.SetActive(true);
-            patientStandPosition = patientModel.transform.position;
-            patientStandRotation = patientModel.transform.rotation;
+            CachePatientStandPose();
 
             patientAnimator = patientModel.GetComponent<Animator>();
             if (patientAnimator != null)
@@ -1922,6 +2372,11 @@ namespace CPRSimulation.Game
                 PrepareTrainingSelectionUI();
                 SaveInitialCameraPositionIfNeeded(false);
                 PlaySound(introSound);
+
+                // 每次进场都弹一次：这套设备是不同学员轮流戴的，
+                // 不能假设上一个人看过说明就够了。看完点「確認」关掉。
+                ShowControlsGuide();
+
                 Debug.Log("[CPRTraining] Waiting for training mode selection.");
                 yield break;
             }
@@ -1990,10 +2445,17 @@ namespace CPRSimulation.Game
             UpdateInstruction(CPRTextLibrary.PatientFell);
             PlaySound(fallSound);
 
+            _teleportCompleted = false;
+
             if (teleportAfterFall && teleportDelay > 0f)
             {
                 Debug.Log($"[CPRTraining] 传送将在{teleportDelay} 秒后执行");
                 StartCoroutine(TeleportAfterDelay(teleportDelay));
+            }
+            else
+            {
+                // 没开传送（或延迟为 0 已立即执行）时不要让后面白等。
+                _teleportCompleted = true;
             }
 
             if (patientModel != null)
@@ -2003,6 +2465,11 @@ namespace CPRSimulation.Game
 
             yield return new WaitForSeconds(0.5f);
             OnPatientFell?.Invoke();
+
+            // 意识确认放在模式分支之前 —— Story / AED / 纯 CPR 三条路都要先做这一步。
+            // （对比 CallingHelp：它只挂在 Story 分支里，地震主流程走的是 AED，
+            //   那一步实际从来没出现过。）
+            yield return StartCoroutine(WaitForResponseCheck());
 
             if (ResolveSelectedTrainingMode() == TrainingMode.Story)
             {
@@ -2055,8 +2522,16 @@ namespace CPRSimulation.Game
             TeleportPlayerToPatient();
         }
 
+        /// <summary>
+        /// 落地后的传送是否已经执行完。
+        /// 意识确认要等它 —— 没传送过去之前，学员根本够不到患者的肩膀。
+        /// </summary>
+        private bool _teleportCompleted;
+
         private void TeleportPlayerToPatient()
         {
+            _teleportCompleted = true;
+
             // 传送前保存当前位置，作为「再来一次」时的恢复目标
             SaveInitialCameraPositionIfNeeded(forceOverwrite: true);
 
@@ -2103,38 +2578,6 @@ namespace CPRSimulation.Game
             Debug.Log($"[CPRTraining] 已传送到患者身旁Pos:{targetPos}");
         }
 
-        private void EnsureHUDFollowsCamera()
-        {
-            if (trainingHUDPanel == null) return;
-            Transform root = trainingHUDPanel.transform;
-            while (root.parent != null) root = root.parent;
-            var follow = root.GetComponent<CPRHUDFollowCamera>();
-            var resultPlacer = root.GetComponent<CPRResultPanelPlacer>();
-            if (resultPlacer != null) resultPlacer.enabled = false; // 训练阶段关闭结果布局
-            if (follow == null)
-            {
-                follow = root.gameObject.AddComponent<CPRHUDFollowCamera>();
-                // 让HUD 更靠近人物和视线
-                follow.placeUINearPatient = true;
-                follow.anchorOverride = patientModel != null
-                    ? FindBoneRecursive(patientModel.transform, "Head")
-                    : null;
-                follow.heightAboveAnchor = 0.25f;
-                follow.distanceInFront = 0.5f;
-                follow.followSmoothing = 0.08f;
-                // 更偏向贴近患者（数值越小越靠近人物）
-                follow.faceCamera = true;
-                follow.onlyWhenActive = false;
-                follow.groundLevel = 0f;
-                // 调低最低高度，让UI 更靠近地面一些
-                follow.minHeightAboveGround = 0.4f;
-            }
-            else
-            {
-                follow.enabled = true;
-            }
-        }
-
         private void EnsureHUDFixedNearPatient()
         {
             if (trainingHUDPanel == null) return;
@@ -2165,27 +2608,91 @@ namespace CPRSimulation.Game
                 return;
 
             Transform viewer = GetPrimaryViewTransform();
-            Vector3 fixedPosition = reference.position + Vector3.up * FixedCprHudHeightAboveChest;
-            Vector3 towardViewer = Vector3.zero;
-            if (viewer != null)
-                towardViewer = Vector3.ProjectOnPlane(viewer.position - reference.position, Vector3.up);
-            if (towardViewer.sqrMagnitude < 0.001f && patientModel != null)
-                towardViewer = -patientModel.transform.forward;
-            if (towardViewer.sqrMagnitude > 0.001f)
+
+            // 面板摆在患者身体的另一侧，板面与躯干平行。
+            //
+            // 实机反馈（山本さん）：说明画面和倒地者重叠，学员没法靠近做胸骨压迫。
+            // 原来是「胸口上方 0.82m、再朝学员方向偏 0.38m」，落点正好是学员俯身按压时
+            // 身体和手臂要占的那块体积；而这块 Canvas 是 1920×1080 @0.001，
+            // 实际有 1.92m × 1.08m，等于一整块墙。
+            //
+            // 现在的摆法对应真人训练时把显示器放在假人另一侧的做法：
+            // 学员跪在近侧，面板在远侧，两者之间只隔着患者本人，永远不会争同一块空间。
+            // 板面平行于躯干是关键 —— 面板的宽度沿身体方向铺开，而不是横切过去；
+            // 用 billboard（始终正对学员）就会斜着穿过身体，等于把问题又造回来。
+            Vector3 chest = reference.position;
+            Transform head = patientModel != null
+                ? FindBoneRecursive(patientModel.transform, "Head")
+                : null;
+
+            Vector3 alongBody = head != null
+                ? Vector3.ProjectOnPlane(head.position - chest, Vector3.up)
+                : Vector3.zero;
+
+            // 仰卧时根物体的 forward 仍是站立时的朝向，不可信。拿不到头部骨骼时，
+            // 把「学员→患者」当成横向，反推一条躯干轴：学员总是从侧面接近倒地者，
+            // 这个假设比 forward 可靠。
+            if (alongBody.sqrMagnitude < 0.0001f && viewer != null)
             {
-                towardViewer.Normalize();
-                fixedPosition += towardViewer * FixedCprHudDistanceTowardViewer;
+                Vector3 towardPatient = Vector3.ProjectOnPlane(chest - viewer.position, Vector3.up);
+                alongBody = Vector3.Cross(Vector3.up, towardPatient);
             }
+
+            if (alongBody.sqrMagnitude < 0.0001f)
+                alongBody = Vector3.forward;
+
+            alongBody.Normalize();
+
+            // 躯干的横向：垂直于躯干轴的水平方向，取背离学员的那一侧。
+            Vector3 side = Vector3.Cross(Vector3.up, alongBody).normalized;
+            if (viewer != null && Vector3.Dot(side, viewer.position - chest) > 0f)
+                side = -side;
+
+            Vector3 fixedPosition = chest + side * CprHudSideDistance;
+            fixedPosition.y = chest.y + CprHudHeightAboveChest;
 
             root.position = fixedPosition;
             root.localScale = Vector3.one * 0.001f;
 
-            if (viewer != null)
-            {
-                Vector3 faceDirection = Vector3.ProjectOnPlane(root.position - viewer.position, Vector3.up);
-                if (faceDirection.sqrMagnitude > 0.001f)
-                    root.rotation = Quaternion.LookRotation(faceDirection.normalized, Vector3.up);
-            }
+            // Canvas 的 +Z 是背面朝向，要指向背离学员的一侧才正面可读。
+            // side 已经是背离学员的方向，所以直接用它当 forward；
+            // 于是 right = cross(up, side) 落在 ±alongBody 上 —— 板面与躯干平行。
+            root.rotation = Quaternion.LookRotation(side, Vector3.up);
+
+            // 位置到这里就定死了，之后不再改动。
+            // 守卫只负责「万一贴脸就淡出」，不会挪动面板。
+            EnsureWorkspaceGuard(root);
+        }
+
+        /// <summary>
+        /// 给 UI 根挂上贴脸淡出保护。它**不会移动面板** —— 位置由上面算一次就定死。
+        /// </summary>
+        private void EnsureWorkspaceGuard(Transform root)
+        {
+            if (root == null) return;
+
+            var guard = root.GetComponent<CprWorkspaceUIGuard>();
+            if (guard == null)
+                guard = root.gameObject.AddComponent<CprWorkspaceUIGuard>();
+
+            // 正常摆位下这套阈值根本不会触发：俯身按压时头离侧面的面板约 0.77m，
+            // 远在 0.55m 之外。它只兜「患者被搬动 / 学员绕到另一侧」这类意外。
+            // 阈值不能再往上调 —— 调到 1.0m 的话，深度条会在按压过程中淡掉，
+            // 正是最需要它的时候。
+            guard.fadeStartDistance = 0.55f;
+            guard.fadeEndDistance = 0.28f;
+
+            guard.enabled = true;
+        }
+
+        /// <summary>离开按压阶段时关掉守卫，别让结果面板也跟着淡出。</summary>
+        private void DisableWorkspaceGuard(Transform root)
+        {
+            if (root == null) return;
+
+            var guard = root.GetComponent<CprWorkspaceUIGuard>();
+            if (guard != null)
+                guard.enabled = false;
         }
 
         private Transform GetPrimaryViewTransform()
@@ -2535,8 +3042,17 @@ namespace CPRSimulation.Game
             // 否则检测区继承胸骨(Spine2)旋转，按压轴投影会算错深度。患者动画已冻结(speed=0)，此旋转保持稳定。
             chestDetectionZone.transform.rotation = Quaternion.identity;
 
-            // 红色半透明材质（兼容URP 和Built-in）
             var renderer = chestDetectionZone.GetComponent<Renderer>();
+
+            if (!showDetectionZone)
+            {
+                // 只关渲染。SphereCollider 的 isTrigger 和 HandTrackingAdapter 的
+                // 距离备用检测都不依赖 Renderer，所以按压检测完全不受影响。
+                if (renderer != null)
+                    renderer.enabled = false;
+            }
+
+            // 红色半透明材质（兼容URP 和Built-in）
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
             if (shader == null) shader = Shader.Find("Sprites/Default");
@@ -2569,8 +3085,11 @@ namespace CPRSimulation.Game
             collider.isTrigger = true;
             collider.radius = detectionTriggerRadius;
 
-            // 添加脉冲发光动画
-            chestDetectionZone.AddComponent<DetectionZonePulse>();
+            // 添加脉冲发光动画。隐藏时不加 —— 它每帧都写 rend.material.color，
+            // 而 .material（非 sharedMaterial）首次访问会实例化一份材质副本，
+            // 对一个不渲染的物体做这些是纯浪费。
+            if (showDetectionZone)
+                chestDetectionZone.AddComponent<DetectionZonePulse>();
 
             // 确保有手部追踪适配器（距离备用检测需要）
             EnsureHandTrackingAdapter();
@@ -2745,12 +3264,24 @@ namespace CPRSimulation.Game
             }
 
             ChangePhase(TrainingPhase.CPRInProgress);
-            EnsureHUDFollowsCamera();
+
+            // HUD 在这里摆一次就定死，整个按压阶段不再移动。
+            //
+            // 曾经有过一个 EnsureHUDFollowsCamera()：把 HUD 挂上 CPRHUDFollowCamera、
+            // 每帧跟随患者头部骨骼。那个方法从未被调用过，且与「面板不动」的要求相悖，
+            // 已随本次修改一并删除。CPRHUDFollowCamera 组件本身保留，
+            // 但 EnsureHUDFixedNearPatient 开头就会把它关掉。
+            EnsureHUDFixedNearPatient();
+
             ShowPanel(trainingHUDPanel);
             BuildMergedCprHudIfNeeded();
 
             ResetSessionMetrics();
             trainingStartTime = Time.time;
+            // CCF 的分母从这里起算：按压阶段真正开始的时刻
+            _cprPhaseStartTime = trainingStartTime;
+
+            OnSessionStarted?.Invoke(this);
 
             if (hapticController != null)
             {
@@ -2779,8 +3310,7 @@ namespace CPRSimulation.Game
         public void HideCprUiForAedMode()
         {
             HideAllPanels();
-            if (_languageSelectPanel != null)
-                _languageSelectPanel.SetActive(false);
+            SetSelectionChromeVisible(false);
         }
 
         private void ResetSessionMetrics()
@@ -2800,19 +3330,50 @@ namespace CPRSimulation.Game
             _tooFastSamples = 0;
             _currentQualityStreak = 0;
             _bestQualityStreak = 0;
+
+            _fullRecoilSamples = 0;
+            _sumRecoilDeficitCm = 0f;
+            _onTargetSamples = 0;
+            _sumOffsetCm = 0f;
+            _cprPhaseStartTime = 0f;
+            _lastCompressionAtTime = 0f;
+            _totalHandsOffSeconds = 0f;
+            _longestHandsOffSeconds = 0f;
+            _interruptionCount = 0;
+
+            _responseCheckSeconds = 0f;
+            _responseCheckVoiceHeard = false;
+            _responseCheckSkipped = false;
+
+            _awaitingVentilation = false;
+            _breathsGivenThisCycle = 0;
+            _ventilationStartTime = 0f;
+            _ventilationCyclesDone = 0;
+            _totalBreathsGiven = 0;
+            _longestVentilationPauseSec = 0f;
+            _sumVentilationPauseSec = 0f;
+            if (_ventilationPanel != null)
+                _ventilationPanel.SetActive(false);
         }
 
         private void OnCompressionDetected(float depth, float rate)
         {
             if (currentPhase != TrainingPhase.CPRInProgress) return;
 
+            // 正在等人工呼吸时按下去的不计数：否则学员可以一路压穿 30:2 的节奏，
+            // 循环就失去意义了。界面上会一直提示该做什么。
+            if (_awaitingVentilation)
+                return;
+
+            int target = EffectiveTargetCompressions;
+
             compressionCount++;
             // 累积用于平均值统计
             RecordCompressionSample(depth, rate);
 
-            OnCompressionProgress?.Invoke(compressionCount, targetCompressions);
+            OnCompressionProgress?.Invoke(compressionCount, target);
 
-            UpdateInstruction(CPRTextLibrary.CPRAbortProgress(compressionCount, targetCompressions, depth, rate));
+            UpdateInstruction(CPRTextLibrary.CPRAbortProgress(compressionCount, target, depth, rate));
             UpdateMergedCprHud(depth, rate, true);
 
             // 直接触发触觉（不依赖事件订阅，确保每次按压都有反馈）
@@ -2821,10 +3382,484 @@ namespace CPRSimulation.Game
             if (hapticController != null && !hapticController.IsBoundTo(pressDetector))
                 hapticController.TriggerByDepth(depth);
 
-            if (compressionCount >= targetCompressions)
+            bool cycleBoundary = useVentilationCycles &&
+                                 compressionsPerCycle > 0 &&
+                                 compressionCount % compressionsPerCycle == 0;
+
+            // 循环边界优先于完成判定：最后一个 30 次压完之后还欠 2 次人工呼吸，
+            // 直接收尾的话「2 个 30:2 循环」实际只做了 1 次通气。
+            // 通气做完由 EndVentilation 再判完成。
+            if (cycleBoundary)
+            {
+                BeginVentilation();
+                return;
+            }
+
+            if (compressionCount >= target)
+                CompleteTraining();
+        }
+
+        // ─── 30:2 人工呼吸 ──────────────────────────────────────────────
+        private bool _awaitingVentilation;
+        private int _breathsGivenThisCycle;
+        private float _ventilationStartTime;
+        private GameObject _ventilationPanel;
+        private TMP_Text _ventilationText;
+        private Button _ventilationBreathButton;
+        // 统计
+        private int _ventilationCyclesDone;
+        private int _totalBreathsGiven;
+        private float _longestVentilationPauseSec;
+        private float _sumVentilationPauseSec;
+
+        /// <summary>指南要求任何中断都在 10 秒以内，通气停顿也不例外。</summary>
+        private const float VentilationPauseLimitSec = 10f;
+
+        // ─── 意识确认（反応の確認：両肩を叩いて呼びかける）──────
+        [Header("意识确认")]
+        [Tooltip("多少秒后出现「跳过」按钮。手部追踪失灵或碰撞体没配好时，学员不至于彻底卡死。")]
+        public float responseCheckSkipAfterSeconds = 20f;
+
+        [Tooltip("检测到两肩都被拍后，停留多久再进入下一步（秒），让学员看到 ✓。")]
+        public float responseCheckConfirmHold = 1.0f;
+
+        private ResponseCheckDetector _responseCheckDetector;
+        private ResponseCallVoiceMonitor _responseVoiceMonitor;
+        private GameObject _responseCheckPanel;
+        private TMP_Text _responseCheckText;
+        private Button _responseCheckSkipButton;
+
+        private float _responseCheckSeconds;
+        private bool _responseCheckVoiceHeard;
+        private bool _responseCheckSkipped;
+        private bool _responseCheckDone;
+
+        /// <summary>
+        /// 意识确认：拍两肩（卡关条件）+ 呼唤（只记录）。
+        /// 超时后给一个跳过按钮 —— 卡关是为了让步骤真的被执行，
+        /// 不是为了在追踪失灵时把学员锁死在这一屏。
+        /// </summary>
+        private IEnumerator WaitForResponseCheck()
+        {
+            ChangePhase(TrainingPhase.CheckingResponse);
+            HideAllPanels();
+
+            // 先等传送落地再开始。
+            //
+            // 传送是在流程开头按固定墙钟时间（默认 4 秒）排的，
+            // 而这一步是倒地动画播完之后才到 —— 谁先谁后取决于动画片段的实际长度，
+            // 而那个值从来没被固定过（场景配的是 DeathFromRight，兑不出时长就回退 3.5s）。
+            //
+            // 撞上会出两种问题：学员在确认过程中被整个拽走；
+            // 或者还没被传送过去、根本够不到肩膀。
+            // 顺带也保证计时器量的是学员的反应，而不是等传送的死时间。
+            if (teleportAfterFall && !_teleportCompleted)
+            {
+                float teleportWaitCap = teleportDelay + 2f;
+                float teleportWaitStart = Time.time;
+                while (!_teleportCompleted && Time.time - teleportWaitStart < teleportWaitCap)
+                    yield return null;
+
+                if (!_teleportCompleted)
+                    Debug.LogWarning("[CPRTraining] 等传送超时，意识确认照常开始");
+            }
+
+            _responseCheckDone = false;
+            _responseCheckSkipped = false;
+            _responseCheckVoiceHeard = false;
+            _responseCheckSeconds = 0f;
+
+            SetupResponseCheckDetector();
+            BeginResponseVoiceMonitoring();
+            EnsureResponseCheckPanel();
+
+            if (_responseCheckPanel != null)
+            {
+                _responseCheckPanel.SetActive(true);
+                _responseCheckPanel.transform.SetAsLastSibling();
+            }
+
+            SetGuideButtonLabel(_responseCheckSkipButton, CPRTextLibrary.BtnSkipResponseCheck);
+            if (_responseCheckSkipButton != null)
+                _responseCheckSkipButton.gameObject.SetActive(false);
+
+            float start = Time.time;
+
+            while (!_responseCheckDone)
+            {
+                _responseCheckSeconds = Time.time - start;
+
+                if (_responseVoiceMonitor != null && _responseVoiceMonitor.HeardCall)
+                    _responseCheckVoiceHeard = true;
+
+                // 超时后才露出跳过按钮：一上来就给，学员会直接点掉。
+                if (_responseCheckSkipButton != null &&
+                    !_responseCheckSkipButton.gameObject.activeSelf &&
+                    _responseCheckSeconds >= responseCheckSkipAfterSeconds)
+                {
+                    _responseCheckSkipButton.gameObject.SetActive(true);
+                }
+
+                RefreshResponseCheckText();
+
+                if (_responseCheckDetector != null && _responseCheckDetector.BothTouched)
+                {
+                    RefreshResponseCheckText();
+                    yield return new WaitForSeconds(responseCheckConfirmHold);
+                    _responseCheckDone = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            _responseCheckSeconds = Time.time - start;
+
+            if (_responseVoiceMonitor != null && _responseVoiceMonitor.HeardCall)
+                _responseCheckVoiceHeard = true;
+
+            Debug.Log($"[CPRTraining] 意识确认结束，用时 {_responseCheckSeconds:F1}s，" +
+                      $"呼唤={_responseCheckVoiceHeard}，跳过={_responseCheckSkipped}");
+
+            EndResponseVoiceMonitoring();
+            TeardownResponseCheckDetector();
+
+            if (_responseCheckPanel != null)
+                _responseCheckPanel.SetActive(false);
+        }
+
+        private void OnResponseCheckSkipped()
+        {
+            _responseCheckSkipped = true;
+            _responseCheckDone = true;
+        }
+
+        private void SetupResponseCheckDetector()
+        {
+            TeardownResponseCheckDetector();
+
+            if (patientModel == null)
+            {
+                AutoFindAndFixPatient();
+                if (patientModel == null)
+                {
+                    Debug.LogWarning("[CPRTraining] 没有患者模型，意识确认只能靠跳过按钮通过");
+                    return;
+                }
+            }
+
+            Transform leftShoulder = FindBoneRecursive(patientModel.transform, "LeftShoulder");
+            if (leftShoulder == null) leftShoulder = FindBoneRecursive(patientModel.transform, "LeftArm");
+
+            Transform rightShoulder = FindBoneRecursive(patientModel.transform, "RightShoulder");
+            if (rightShoulder == null) rightShoulder = FindBoneRecursive(patientModel.transform, "RightArm");
+
+            var host = new GameObject("ResponseCheckDetector");
+            _responseCheckDetector = host.AddComponent<ResponseCheckDetector>();
+            _responseCheckDetector.Initialize(leftShoulder, rightShoulder, FindObjectOfType<HandTrackingAdapter>());
+        }
+
+        private void TeardownResponseCheckDetector()
+        {
+            if (_responseCheckDetector != null)
+            {
+                Destroy(_responseCheckDetector.gameObject);
+                _responseCheckDetector = null;
+            }
+        }
+
+        private void BeginResponseVoiceMonitoring()
+        {
+            if (_responseVoiceMonitor == null)
+            {
+                var host = new GameObject("ResponseCallVoiceMonitor");
+                host.transform.SetParent(transform, false);
+                _responseVoiceMonitor = host.AddComponent<ResponseCallVoiceMonitor>();
+            }
+
+            _responseVoiceMonitor.BeginListening();
+        }
+
+        private void EndResponseVoiceMonitoring()
+        {
+            if (_responseVoiceMonitor != null)
+                _responseVoiceMonitor.StopListening();
+        }
+
+        private void RefreshResponseCheckText()
+        {
+            if (_responseCheckText == null)
+                return;
+
+            bool left = _responseCheckDetector != null && _responseCheckDetector.LeftTouched;
+            bool right = _responseCheckDetector != null && _responseCheckDetector.RightTouched;
+
+            string doneMark = CPRTextLibrary.ResponseCheckMarkDone;
+            string pendingMark = CPRTextLibrary.ResponseCheckMarkPending;
+
+            bool micAvailable = _responseVoiceMonitor != null && _responseVoiceMonitor.MicAvailable;
+
+            _responseCheckText.text = CPRTextLibrary.ResponseCheckPrompt(
+                left ? doneMark : pendingMark,
+                right ? doneMark : pendingMark,
+                CPRTextLibrary.ResponseCheckVoiceLine(micAvailable, _responseCheckVoiceHeard),
+                _responseCheckSeconds);
+        }
+
+        private void EnsureResponseCheckPanel()
+        {
+            if (_responseCheckPanel != null)
+                return;
+
+            Canvas canvas = trainingHUDPanel != null
+                ? trainingHUDPanel.GetComponentInParent<Canvas>()
+                : FindObjectOfType<Canvas>();
+            if (canvas == null)
+                return;
+
+            _responseCheckPanel = new GameObject("ResponseCheckPanel", typeof(RectTransform), typeof(Image));
+            _responseCheckPanel.transform.SetParent(canvas.transform, false);
+
+            var rt = _responseCheckPanel.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = new Vector2(0f, -40f);
+            rt.sizeDelta = new Vector2(1000f, 400f);
+
+            _responseCheckPanel.GetComponent<Image>().color = new Color(0.03f, 0.05f, 0.08f, 0.94f);
+            VRTrainingUIStyle.ApplyPanel(_responseCheckPanel, true);
+
+            _responseCheckText = EnsureRuntimeText(
+                _responseCheckPanel.transform, "ResponseCheckText",
+                new Vector2(0f, 60f), new Vector2(920f, 230f),
+                32, TextAnchor.UpperLeft, UIColorScheme.TextPrimary);
+
+            _responseCheckSkipButton = CreateGuideButton(
+                _responseCheckPanel.transform, "ResponseCheckSkipButton",
+                new Vector2(0f, -130f), new Vector2(420f, 86f),
+                UIColorScheme.PrimaryDark, OnResponseCheckSkipped);
+
+            _responseCheckPanel.SetActive(false);
+        }
+
+        /// <summary>结果页里意识确认那一行。</summary>
+        private string BuildResponseCheckResult()
+        {
+            if (_responseCheckSkipped)
+                return LanguageManager.Get("已跳过", "スキップ", "skipped");
+
+            string timePart = $"{_responseCheckSeconds:F1} {GetSecondsUnitLabel()}";
+
+            bool micAvailable = _responseVoiceMonitor != null && _responseVoiceMonitor.MicAvailable;
+            if (!micAvailable)
+                return timePart;
+
+            string voicePart = _responseCheckVoiceHeard
+                ? LanguageManager.Get("有呼唤", "呼びかけあり", "called out")
+                : LanguageManager.Get("未听到呼唤", "呼びかけなし", "no call heard");
+
+            return $"{timePart}  ({voicePart})";
+        }
+
+        private void BeginVentilation()
+        {
+            _awaitingVentilation = true;
+            _breathsGivenThisCycle = 0;
+            _ventilationStartTime = Time.time;
+
+            EnsureVentilationPanel();
+            if (_ventilationPanel != null)
+            {
+                _ventilationPanel.SetActive(true);
+                _ventilationPanel.transform.SetAsLastSibling();
+            }
+
+            // 按钮标签只在这里写一次 —— RefreshVentilationText 是每帧调的，
+            // 在那里面做 GetComponentInChildren 是白烧 CPU。
+            SetGuideButtonLabel(_ventilationBreathButton, CPRTextLibrary.BtnGiveBreath);
+            RefreshVentilationText();
+            PlaySound(introSound);
+            Debug.Log($"[CPRTraining] 第 {compressionCount / Mathf.Max(1, compressionsPerCycle)} 个循环按压完成，转人工呼吸");
+        }
+
+        /// <summary>
+        /// 学员完成一次吹气。VR 里没法真的测通气量，所以这里做的是
+        /// 「按节奏走完流程 + 把停顿时间压短」这两件能训练的事。
+        /// </summary>
+        public void OnBreathDelivered()
+        {
+            if (!_awaitingVentilation)
+                return;
+
+            _breathsGivenThisCycle++;
+            _totalBreathsGiven++;
+
+            if (_breathsGivenThisCycle >= Mathf.Max(1, breathsPerCycle))
+                EndVentilation();
+            else
+                RefreshVentilationText();
+        }
+
+        private void EndVentilation()
+        {
+            float pause = Time.time - _ventilationStartTime;
+            _ventilationCyclesDone++;
+            _sumVentilationPauseSec += pause;
+            _longestVentilationPauseSec = Mathf.Max(_longestVentilationPauseSec, pause);
+
+            // 手确实离开了胸口，CCF 一律照算。
+            _totalHandsOffSeconds += pause;
+
+            // 但 30:2 的通气停顿是计划内的，不该记成「操作失误型中断」——
+            // 除非超过 10 秒，那时它已经违反指南。
+            if (pause > VentilationPauseLimitSec)
+            {
+                _interruptionCount++;
+                _longestHandsOffSeconds = Mathf.Max(_longestHandsOffSeconds, pause);
+            }
+
+            _awaitingVentilation = false;
+            if (_ventilationPanel != null)
+                _ventilationPanel.SetActive(false);
+
+            Debug.Log($"[CPRTraining] 人工呼吸 {_breathsGivenThisCycle} 次完成，停顿 {pause:F1}s");
+
+            // 完成判定挪到这里：最后一个循环的通气做完才算整套 30:2 走完。
+            if (compressionCount >= EffectiveTargetCompressions)
             {
                 CompleteTraining();
+                return;
             }
+
+            // 下一轮按压的起点。不重置的话，通气这段停顿会在下一次按压时
+            // 被 RecordHandsOffSample 当成「从上一次按压到现在」的空窗二次计入。
+            _lastCompressionAtTime = Time.time;
+        }
+
+        private void RefreshVentilationText()
+        {
+            if (_ventilationText == null)
+                return;
+
+            float elapsed = Time.time - _ventilationStartTime;
+            int remaining = Mathf.Max(0, Mathf.Max(1, breathsPerCycle) - _breathsGivenThisCycle);
+
+            _ventilationText.text = CPRTextLibrary.VentilationPrompt(
+                compressionsPerCycle, breathsPerCycle, remaining, elapsed);
+            _ventilationText.color = elapsed > VentilationPauseLimitSec
+                ? UIColorScheme.Danger
+                : UIColorScheme.TextPrimary;
+        }
+
+        private void EnsureVentilationPanel()
+        {
+            if (_ventilationPanel != null)
+                return;
+
+            Canvas canvas = trainingHUDPanel != null
+                ? trainingHUDPanel.GetComponentInParent<Canvas>()
+                : FindObjectOfType<Canvas>();
+            if (canvas == null)
+                return;
+
+            _ventilationPanel = new GameObject("VentilationPanel", typeof(RectTransform), typeof(Image));
+            _ventilationPanel.transform.SetParent(canvas.transform, false);
+
+            var rt = _ventilationPanel.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = new Vector2(0f, -40f);
+            rt.sizeDelta = new Vector2(1000f, 400f);
+
+            _ventilationPanel.GetComponent<Image>().color = new Color(0.03f, 0.07f, 0.05f, 0.94f);
+            VRTrainingUIStyle.ApplyPanel(_ventilationPanel, true);
+
+            _ventilationText = EnsureRuntimeText(
+                _ventilationPanel.transform, "VentilationText",
+                new Vector2(0f, 60f), new Vector2(920f, 230f),
+                32, TextAnchor.UpperLeft, UIColorScheme.TextPrimary);
+
+            _ventilationBreathButton = CreateGuideButton(
+                _ventilationPanel.transform, "VentilationBreathButton",
+                new Vector2(0f, -130f), new Vector2(420f, 86f),
+                UIColorScheme.Info, OnBreathDelivered);
+
+            _ventilationPanel.SetActive(false);
+        }
+
+        /// <summary>
+        /// 记录这一次按压的回弹和位置。检测器在 EndCompression 里已经算好，
+        /// OnCompressionComplete 是在同一次 EndCompression 里紧接着发的，
+        /// 所以这里读到的 LastRecoilIncomplete / LastOffTarget 就是本次按压的值。
+        /// </summary>
+        private void RecordRecoilAndPositionSample()
+        {
+            if (pressDetector == null)
+                return;
+
+            if (!pressDetector.LastRecoilIncomplete)
+                _fullRecoilSamples++;
+            _sumRecoilDeficitCm += pressDetector.LastRecoilDeficitCm;
+
+            if (!pressDetector.LastOffTarget)
+                _onTargetSamples++;
+            _sumOffsetCm += pressDetector.LastOffsetCm;
+        }
+
+        /// <summary>
+        /// 统计按压之间的空窗（hands-off）。指南要求单次中断 &lt;10 秒、
+        /// 胸骨压迫比(CCF)尽量 &gt;60%。正常按压间隔约 0.5–0.6 秒，
+        /// 所以只有超过 InterruptionThresholdSec 的空窗才算真正的中断。
+        /// </summary>
+        private void RecordHandsOffSample()
+        {
+            float now = Time.time;
+
+            if (_lastCompressionAtTime > 0f)
+            {
+                float gap = now - _lastCompressionAtTime;
+                // 通气停顿在 EndVentilation 里已经单独记过，并且那里会把
+                // _lastCompressionAtTime 推到通气结束时刻，所以这里不会重复计。
+                if (gap > InterruptionThresholdSec)
+                {
+                    _interruptionCount++;
+                    _totalHandsOffSeconds += gap;
+                    _longestHandsOffSeconds = Mathf.Max(_longestHandsOffSeconds, gap);
+                }
+            }
+            else if (_cprPhaseStartTime > 0f)
+            {
+                // 进入按压阶段到第一次按压之间的犹豫时间同样是中断。
+                float startupGap = now - _cprPhaseStartTime;
+                if (startupGap > InterruptionThresholdSec)
+                {
+                    _interruptionCount++;
+                    _totalHandsOffSeconds += startupGap;
+                    _longestHandsOffSeconds = Mathf.Max(_longestHandsOffSeconds, startupGap);
+                }
+            }
+
+            _lastCompressionAtTime = now;
+        }
+
+        /// <summary>
+        /// 胸骨压迫比。分母是按压阶段的总时长，分子是总时长减去所有中断。
+        /// 训练还没结束时用「到此刻为止」算。
+        /// </summary>
+        private float CalculateChestCompressionFraction(float phaseEndTime)
+        {
+            if (_cprPhaseStartTime <= 0f)
+                return 0f;
+
+            float span = phaseEndTime - _cprPhaseStartTime;
+            if (span <= 0.5f)
+                return 0f;
+
+            // 最后一次按压之后到结束之间的空窗也要算进去，否则提前收尾能刷高 CCF。
+            float trailing = _lastCompressionAtTime > 0f ? phaseEndTime - _lastCompressionAtTime : span;
+            float handsOff = _totalHandsOffSeconds + (trailing > InterruptionThresholdSec ? trailing : 0f);
+
+            return Mathf.Clamp01((span - handsOff) / span) * 100f;
         }
 
         private void RecordCompressionSample(float depth, float rate)
@@ -2836,6 +3871,9 @@ namespace CPRSimulation.Game
 
             _sumDepthCm += depth;
             _compressionSamples++;
+
+            RecordRecoilAndPositionSample();
+            RecordHandsOffSample();
 
             bool depthGood = depth >= minDepth && depth <= maxDepth;
             if (depthGood)
@@ -2888,6 +3926,7 @@ namespace CPRSimulation.Game
                 while (root.parent != null) root = root.parent;
                 var follow = root.GetComponent<CPRHUDFollowCamera>();
                 if (follow != null) follow.enabled = false;
+                DisableWorkspaceGuard(root);   // 结果要能凑近看，这里不该再淡出
                 var placer = root.GetComponent<CPRResultPanelPlacer>();
                 if (completionPanelFixedPosition)
                 {
@@ -2945,7 +3984,7 @@ namespace CPRSimulation.Game
 
             string result = BuildEnhancedTrainingResultText(
                 compressionCount,
-                targetCompressions,
+                EffectiveTargetCompressions,
                 totalTime,
                 avgDepth,
                 avgRate,
@@ -3004,6 +4043,9 @@ namespace CPRSimulation.Game
             PlaySound(completeSound);
 
             Debug.Log($"[CPRTraining] 完成 - 按压:{compressionCount}, 用时:{totalTime:F1}s");
+
+            // 研究用ログ。ここで投げないと、結果テキストを作った時点の統計が失われる。
+            OnSessionCompleted?.Invoke(this);
         }
 
         /// <summary>
@@ -3026,30 +4068,59 @@ namespace CPRSimulation.Game
 
             float depthScore = CalculateHitPercent(_goodDepthSamples, _compressionSamples);
             float rateScore = _rateSamples > 0 ? CalculateHitPercent(_goodRateSamples, _rateSamples) : CalculateRangeScore(avgRate, minRate, maxRate);
+            float recoilScore = CalculateHitPercent(_fullRecoilSamples, _compressionSamples);
+            float positionScore = CalculateHitPercent(_onTargetSamples, _compressionSamples);
+            float ccf = CalculateChestCompressionFraction(Time.time);
+            float ccfScore = CalculateCcfScore(ccf);
             float consistencyScore = CalculateConsistencyScore();
             float countScore = Mathf.Clamp01(target > 0 ? count / (float)target : 0f) * 100f;
             bool includeAed = RequiresAedFlowForResult();
             float aedScore = includeAed ? CalculateAedScore() : 100f;
+
+            // 权重改版：指南把「深度、频率、完全回弹、按压位置、尽量不中断」
+            // 并列为按压质量的核心要素，之前只有前两项计分。
+            // 回弹和位置各 15%，CCF 10%，深度/频率各降到 25%/20%。
             float overallScore = includeAed
-                ? depthScore * 0.25f + rateScore * 0.25f + consistencyScore * 0.10f + countScore * 0.15f + aedScore * 0.25f
-                : depthScore * 0.35f + rateScore * 0.35f + consistencyScore * 0.10f + countScore * 0.20f;
+                ? depthScore * 0.18f + rateScore * 0.15f + recoilScore * 0.11f + positionScore * 0.11f +
+                  ccfScore * 0.07f + consistencyScore * 0.06f + countScore * 0.07f + aedScore * 0.25f
+                : depthScore * 0.25f + rateScore * 0.20f + recoilScore * 0.15f + positionScore * 0.15f +
+                  ccfScore * 0.10f + consistencyScore * 0.05f + countScore * 0.10f;
+
+            float avgRecoilDeficit = _compressionSamples > 0 ? _sumRecoilDeficitCm / _compressionSamples : 0f;
+            float avgOffset = _compressionSamples > 0 ? _sumOffsetCm / _compressionSamples : 0f;
 
             string separator = "\n";
             string result =
                 $"{GetResultHeaderLabel()} - {GetResultModeLabel()}{separator}" +
-                $"{GetOverallScoreLabel()}: {overallScore:F0}/100  {GetTrainingGrade(overallScore)}{separator}{separator}" +
+                $"{GetOverallScoreLabel()}: {overallScore:F0}/100  {GetTrainingGrade(overallScore)}{separator}" +
+                // 不加 <size> 之类的富文本标签：结果文字用的是场景里那个 legacy Text，
+                // 它的 supportRichText 由场景决定，关着的话标签会原样显示出来。
+                $"{GetGuidelineVersionNote()}{separator}{separator}" +
                 $"{GetScoreBreakdownLabel()}{separator}" +
                 $"{GetDepthScoreLabel()}: {depthScore:F0}/100  ({avgDepth:F1} cm){separator}" +
                 $"{GetRateScoreLabel()}: {rateScore:F0}/100  ({avgRate:F0}/min){separator}" +
+                $"{GetRecoilScoreLabel()}: {recoilScore:F0}/100  ({GetRecoilResidualLabel()} {avgRecoilDeficit:F1} cm){separator}" +
+                $"{GetPositionScoreLabel()}: {positionScore:F0}/100  ({GetOffsetLabel()} {avgOffset:F1} cm){separator}" +
+                $"{GetCcfScoreLabel()}: {ccfScore:F0}/100  (CCF {ccf:F0}%){separator}" +
                 $"{GetConsistencyScoreLabel()}: {consistencyScore:F0}/100  ({GetBestStreakLabel()}: {_bestQualityStreak}){separator}" +
                 $"{GetCompressionCountLabel()}: {count}/{target}  ({countScore:F0}/100){separator}" +
                 $"{GetAedStepScoreLabel()}: {(includeAed ? $"{aedScore:F0}/100" : GetNotIncludedLabel())}{separator}{separator}" +
                 $"{GetGuidelineHitRateLabel()}{separator}" +
                 $"{GetDepthInRangeLabel()}: {FormatPercent(_goodDepthSamples, _compressionSamples)}  ({_goodDepthSamples}/{_compressionSamples}){separator}" +
                 $"{GetRateInRangeLabel()}: {FormatPercent(_goodRateSamples, _rateSamples)}  ({_goodRateSamples}/{_rateSamples}){separator}" +
+                $"{GetFullRecoilRateLabel()}: {FormatPercent(_fullRecoilSamples, _compressionSamples)}  ({_fullRecoilSamples}/{_compressionSamples}){separator}" +
+                $"{GetOnTargetRateLabel()}: {FormatPercent(_onTargetSamples, _compressionSamples)}  ({_onTargetSamples}/{_compressionSamples}){separator}" +
                 $"{GetBestStreakLabel()}: {_bestQualityStreak}{separator}{separator}" +
                 $"{GetProcessDataLabel()}{separator}" +
                 $"{GetTimeUsedLabel()}: {totalTime:F1} {GetSecondsUnitLabel()}{separator}" +
+                $"{GetInterruptionLabel()}: {_interruptionCount} {GetTimesUnitLabel()}  " +
+                $"({GetLongestInterruptionLabel()} {_longestHandsOffSeconds:F1} {GetSecondsUnitLabel()}){separator}" +
+                $"{GetResponseCheckLabel()}: {BuildResponseCheckResult()}{separator}" +
+                (useVentilationCycles
+                    ? $"{GetVentilationLabel()}: {_ventilationCyclesDone} {GetCycleUnitLabel()} / " +
+                      $"{_totalBreathsGiven} {GetTimesUnitLabel()}  " +
+                      $"({GetLongestPauseLabel()} {_longestVentilationPauseSec:F1} {GetSecondsUnitLabel()}){separator}"
+                    : string.Empty) +
                 $"{depthEval}{separator}" +
                 $"{rateEval}{separator}{separator}" +
                 $"{GetNextFocusLabel()}: {BuildNextFocus()}{separator}{separator}" +
@@ -3062,6 +4133,21 @@ namespace CPRSimulation.Game
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// CCF 打分。指南把 60% 当作及格线、80% 以上视为良好，
+        /// 所以不做线性映射：60% 给 60 分，80% 给 90 分，80% 以上才拿满分。
+        /// </summary>
+        private float CalculateCcfScore(float ccfPercent)
+        {
+            if (ccfPercent <= 0f)
+                return 0f;
+            if (ccfPercent >= 80f)
+                return 100f;
+            if (ccfPercent >= 60f)
+                return 60f + (ccfPercent - 60f) / 20f * 40f;   // 60→60 分，80→100 分，连续
+            return ccfPercent;                                  // 不及格区间直接按比例
         }
 
         private float CalculateRangeScore(float value, float min, float max)
@@ -3099,7 +4185,8 @@ namespace CPRSimulation.Game
                 return 0f;
 
             float combinedHitRate = CalculateHitPercent(_goodCombinedSamples, _rateSamples);
-            float streakTarget = Mathf.Clamp(targetCompressions > 0 ? targetCompressions * 0.35f : 8f, 6f, 12f);
+            int streakBase = EffectiveTargetCompressions;
+            float streakTarget = Mathf.Clamp(streakBase > 0 ? streakBase * 0.35f : 8f, 6f, 12f);
             float streakScore = Mathf.Clamp01(_bestQualityStreak / streakTarget) * 100f;
             return combinedHitRate * 0.70f + streakScore * 0.30f;
         }
@@ -3223,6 +4310,18 @@ namespace CPRSimulation.Game
             AppendReviewLine(ref review, _rateSamples > 0 && CalculateHitPercent(_goodRateSamples, _rateSamples) < 75f, GetReviewRateInconsistent());
             AppendReviewLine(ref review, _rateSamples >= 6 && _bestQualityStreak < 8, GetReviewStreakTooShort());
 
+            // 回弹 / 位置 / 中断：指南项目，之前只在实时提示里出现，复盘里没有
+            AppendReviewLine(ref review,
+                _compressionSamples > 0 && CalculateHitPercent(_fullRecoilSamples, _compressionSamples) < 80f,
+                GetReviewRecoilPoor());
+            AppendReviewLine(ref review,
+                _compressionSamples > 0 && CalculateHitPercent(_onTargetSamples, _compressionSamples) < 80f,
+                GetReviewPositionOff());
+            AppendReviewLine(ref review, _longestHandsOffSeconds > 10f, GetReviewInterruptionTooLong());
+            AppendReviewLine(ref review,
+                useVentilationCycles && _longestVentilationPauseSec > VentilationPauseLimitSec,
+                GetReviewVentilationPauseTooLong());
+
             if (includeAed)
             {
                 bool hasAed = VRFirstAid.Equipment.AEDTrainingRuntime.HasResult;
@@ -3298,6 +4397,33 @@ namespace CPRSimulation.Game
         private string GetConsistencyScoreLabel() => LanguageManager.Get("\u7a33\u5b9a\u6027", "\u5b89\u5b9a\u6027", "Consistency");
         private string GetCompressionCountLabel() => LanguageManager.Get("\u6309\u538b\u6b21\u6570", "\u5727\u8feb\u56de\u6570", "Compressions");
         private string GetAedStepScoreLabel() => LanguageManager.Get("AED \u6b65\u9aa4", "AED \u624b\u9806", "AED Steps");
+
+        // \u2500\u2500 \u65b0\u589e\u7684\u6307\u5357\u9879\u76ee\u6807\u7b7e \u2500\u2500
+        private string GetRecoilScoreLabel() => LanguageManager.Get("\u80f8\u5ed3\u56de\u5f39", "\u80f8\u306e\u623b\u308a\uff08\u30ea\u30b3\u30a4\u30eb\uff09", "Chest Recoil");
+        private string GetRecoilResidualLabel() => LanguageManager.Get("\u5e73\u5747\u6b8b\u4f59", "\u5e73\u5747\u6b8b\u308a", "avg residual");
+        private string GetPositionScoreLabel() => LanguageManager.Get("\u6309\u538b\u4f4d\u7f6e", "\u5727\u8feb\u4f4d\u7f6e", "Hand Position");
+        private string GetOffsetLabel() => LanguageManager.Get("\u5e73\u5747\u504f\u79fb", "\u5e73\u5747\u305a\u308c", "avg offset");
+        private string GetCcfScoreLabel() => LanguageManager.Get("\u6309\u538b\u4e0d\u4e2d\u65ad", "\u4e2d\u65ad\u306e\u5c11\u306a\u3055", "Compression Fraction");
+        private string GetFullRecoilRateLabel() => LanguageManager.Get("\u5b8c\u5168\u56de\u5f39\u7387", "\u5b8c\u5168\u30ea\u30b3\u30a4\u30eb\u7387", "Full Recoil Rate");
+        private string GetOnTargetRateLabel() => LanguageManager.Get("\u4f4d\u7f6e\u51c6\u786e\u7387", "\u4f4d\u7f6e\u9069\u5207\u7387", "On-Target Rate");
+        private string GetInterruptionLabel() => LanguageManager.Get("\u4e2d\u65ad\u6b21\u6570", "\u4e2d\u65ad\u56de\u6570", "Interruptions");
+        private string GetLongestInterruptionLabel() => LanguageManager.Get("\u6700\u957f", "\u6700\u9577", "longest");
+        private string GetTimesUnitLabel() => LanguageManager.Get("\u6b21", "\u56de", "times");
+        private string GetResponseCheckLabel() =>
+            LanguageManager.Get("意识确认", "反応の確認", "Response check");
+
+        private string GetVentilationLabel() => LanguageManager.Get("\u4eba\u5de5\u547c\u5438", "\u4eba\u5de5\u547c\u5438", "Ventilation");
+        private string GetCycleUnitLabel() => LanguageManager.Get("\u4e2a\u5faa\u73af", "\u30b5\u30a4\u30af\u30eb", "cycles");
+        private string GetLongestPauseLabel() => LanguageManager.Get("\u6700\u957f\u505c\u987f", "\u6700\u9577\u306e\u4e2d\u65ad", "longest pause");
+
+        /// <summary>
+        /// \u8bc4\u5206\u4f9d\u636e\u7684\u6307\u5357\u7248\u672c\u3002\u5b66\u5458\u548c\u6559\u5458\u90fd\u8be5\u770b\u5f97\u5230\u5206\u6570\u662f\u6309\u54ea\u4e00\u7248\u7b97\u7684\uff0c
+        /// \u9608\u503c\uff08\u6df1 5\u20136cm / 100\u2013120 \u6b21\u5206 / \u5b8c\u5168\u56de\u5f39 / \u4e2d\u65ad &lt;10 \u79d2\uff09\u90fd\u51fa\u81ea\u8fd9\u91cc\u3002
+        /// </summary>
+        private string GetGuidelineVersionNote() => LanguageManager.Get(
+            "\u8bc4\u5206\u4f9d\u636e\uff1aJRC \u82cf\u751f\u6307\u5357 2025 / AHA 2025\uff08\u6df1\u5ea6 5\u20136 cm\uff0c\u9891\u7387 100\u2013120 \u6b21/\u5206\uff0c\u6bcf\u6b21\u5b8c\u5168\u56de\u5f39\uff0c\u4e2d\u65ad <10 \u79d2\uff09",
+            "\u8a55\u4fa1\u57fa\u6e96\uff1aJRC \u8607\u751f\u30ac\u30a4\u30c9\u30e9\u30a4\u30f3 2025 / AHA 2025\uff08\u6df1\u3055 5\u301c6 cm\u3001\u30c6\u30f3\u30dd 100\u301c120 \u56de/\u5206\u3001\u6bce\u56de\u5b8c\u5168\u306b\u623b\u3059\u3001\u4e2d\u65ad\u306f 10 \u79d2\u672a\u6e80\uff09",
+            "Scored against JRC 2025 / AHA 2025 (depth 5-6 cm, rate 100-120/min, full recoil each time, interruptions under 10 s)");
         private string GetGuidelineHitRateLabel() => LanguageManager.Get("\u6307\u5357\u8fbe\u6807\u7387", "\u30ac\u30a4\u30c9\u30e9\u30a4\u30f3\u9054\u6210\u7387", "Guideline Hit Rate");
         private string GetDepthInRangeLabel() => LanguageManager.Get("\u6df1\u5ea6\u8fbe\u6807", "\u6df1\u3055\u9069\u5207", "Depth In Range");
         private string GetRateInRangeLabel() => LanguageManager.Get("\u9891\u7387\u8fbe\u6807", "\u30c6\u30f3\u30dd\u9069\u5207", "Rate In Range");
@@ -3323,6 +4449,26 @@ namespace CPRSimulation.Game
         private string GetReviewNoRateData() => LanguageManager.Get("\u9891\u7387\u6837\u672c\u4e0d\u8db3\uff0c\u9700\u81f3\u5c11\u4e24\u6b21\u8fde\u7eed\u6309\u538b\u624d\u80fd\u8bc4\u4f30\u8282\u594f\u3002", "\u30c6\u30f3\u30dd\u30c7\u30fc\u30bf\u304c\u4e0d\u8db3\u3067\u3059\u30022 \u56de\u4ee5\u4e0a\u9023\u7d9a\u3067\u5727\u8feb\u3059\u308b\u3068\u8a55\u4fa1\u3067\u304d\u307e\u3059\u3002", "Not enough rate samples. At least two consecutive compressions are needed to evaluate rhythm.");
         private string GetReviewDepthInconsistent() => LanguageManager.Get("\u6df1\u5ea6\u8fbe\u6807\u7387\u504f\u4f4e\uff0c\u4e0d\u8981\u53ea\u770b\u5e73\u5747\u503c\uff1b\u6bcf\u6b21\u90fd\u8981\u843d\u5728 5-6 cm\u3002", "\u6df1\u3055\u306e\u5408\u683c\u7387\u304c\u4f4e\u3081\u3067\u3059\u3002\u5e73\u5747\u5024\u3060\u3051\u3067\u306a\u304f\u3001\u6bce\u56de 5-6 cm \u306b\u5165\u308c\u3066\u304f\u3060\u3055\u3044\u3002", "Depth hit rate was low. Do not rely on the average; keep every compression within 5-6 cm.");
         private string GetReviewRateInconsistent() => LanguageManager.Get("\u9891\u7387\u8fbe\u6807\u7387\u504f\u4f4e\uff0c\u5148\u7ec3 10 \u6b21\u7a33\u5b9a\u8282\u62cd\u518d\u8ffd\u6c42\u901f\u5ea6\u3002", "\u30c6\u30f3\u30dd\u306e\u5408\u683c\u7387\u304c\u4f4e\u3081\u3067\u3059\u3002\u307e\u305a 10 \u56de\u306e\u5b89\u5b9a\u3057\u305f\u62cd\u5b50\u3092\u7df4\u7fd2\u3057\u307e\u3059\u3002", "Rate hit rate was low. Practice 10 steady beats before pushing speed.");
+        private string GetReviewVentilationPauseTooLong() => LanguageManager.Get(
+            "人工呼吸的停顿超过 10 秒。吹气前先把头后仰、下颏抬起准备好，吹完立刻恢复按压，不要停下来观察。",
+            "人工呼吸のための中断が 10 秒を超えました。送気前に頭部後屈あご先挙上を済ませ、終わったら観察せずに直ちに圧迫を再開してください。",
+            "The pause for rescue breaths exceeded 10 seconds. Open the airway before you start, and resume compressions immediately after the second breath instead of pausing to observe.");
+
+        private string GetReviewRecoilPoor() => LanguageManager.Get(
+            "回弹不足的按压偏多。压到位后把手完全松开、不要把体重压在胸口，否则血液回不到心脏。",
+            "リコイル不足の圧迫が多いです。圧迫後は手を完全に離し、胸に体重を預けないでください。血液が心臓に戻りません。",
+            "Too many compressions without full recoil. Release completely after each one and do not lean on the chest, or blood cannot refill the heart.");
+
+        private string GetReviewPositionOff() => LanguageManager.Get(
+            "按压位置偏离胸骨中点较多。掌根应放在胸骨下半部（两乳头连线中点附近），偏下压到剑突、偏外压到肋骨都会造成损伤。",
+            "圧迫位置が胸骨の中心からずれています。手のひらの付け根は胸骨の下半分（両乳頭を結ぶ線の中央付近）に置いてください。剣状突起や肋骨の上では損傷を招きます。",
+            "Hand position drifted off the sternum. Put the heel of your palm on the lower half of the sternum; the xiphoid or the ribs will cause injury.");
+
+        private string GetReviewInterruptionTooLong() => LanguageManager.Get(
+            "有超过 10 秒的按压中断。指南要求中断控制在 10 秒以内，换人、分析心律都要提前准备好。",
+            "10 秒を超える中断がありました。ガイドラインは中断を 10 秒未満に抑えることを求めています。交代や心電図解析は事前に準備してください。",
+            "There was an interruption longer than 10 seconds. Guidelines call for keeping interruptions under 10 s; prepare rotations and rhythm checks in advance.");
+
         private string GetReviewStreakTooShort() => LanguageManager.Get("\u8fde\u7eed\u8fbe\u6807\u6bb5\u8f83\u77ed\uff0c\u628a\u76ee\u6807\u8bbe\u4e3a\u8fde\u7eed 8 \u6b21\u6df1\u5ea6\u548c\u9891\u7387\u90fd\u8fbe\u6807\u3002", "\u9023\u7d9a\u5408\u683c\u304c\u77ed\u3081\u3067\u3059\u3002\u6df1\u3055\u3068\u30c6\u30f3\u30dd\u306e\u4e21\u65b9\u3067 8 \u56de\u9023\u7d9a\u5408\u683c\u3092\u76ee\u6307\u3057\u307e\u3059\u3002", "The correct-compression streak was short. Aim for 8 consecutive compressions with both depth and rate in range.");
         private string GetReviewAedNotCompleted() => LanguageManager.Get("AED \u6d41\u7a0b\u672a\u5b8c\u6210\uff0c\u9700\u5b8c\u6210\u5f00\u673a\u3001\u8d34\u7247\u548c\u5206\u6790\u3002", "AED \u624b\u9806\u304c\u672a\u5b8c\u4e86\u3067\u3059\u3002\u96fb\u6e90\u3001\u30d1\u30c3\u30c9\u8cbc\u4ed8\u3001\u89e3\u6790\u3092\u5b8c\u4e86\u3057\u3066\u304f\u3060\u3055\u3044\u3002", "AED flow was not completed. Finish power, pads, and analysis.");
         private string GetReviewPadsMissing() => LanguageManager.Get("AED \u8d34\u7247\u672a\u6b63\u786e\u653e\u7f6e\uff0c\u4f18\u5148\u7ec3\u4e60\u8d34\u7247\u4f4d\u7f6e\u3002", "AED \u30d1\u30c3\u30c9\u304c\u6b63\u3057\u304f\u8cbc\u3089\u308c\u3066\u3044\u307e\u305b\u3093\u3002\u30d1\u30c3\u30c9\u4f4d\u7f6e\u3092\u512a\u5148\u3057\u3066\u7df4\u7fd2\u3057\u3066\u304f\u3060\u3055\u3044\u3002", "AED pads were not placed correctly. Practice pad placement first.");
@@ -3512,6 +4658,7 @@ namespace CPRSimulation.Game
                 TrainingPhase.Intro          => CPRTextLibrary.PhaseIntro,
                 TrainingPhase.WaitingStart   => GetTrainingModeSelectionTitleV2(),
                 TrainingPhase.PatientFalling => CPRTextLibrary.PhaseFalling,
+                TrainingPhase.CheckingResponse => CPRTextLibrary.ResponseCheckTitle,
                 TrainingPhase.CallingHelp    => GetCallingHelpPhaseDisplayName(),
                 TrainingPhase.AEDInProgress  => GetAEDPhaseDisplayName(),
                 TrainingPhase.Quiz           => GetQuizButtonLabel(),
@@ -3951,17 +5098,17 @@ namespace CPRSimulation.Game
             if (_mergedCprCountValueRuntime != null)
             {
                 // \u540c\u7406\uff1a\u6b21\u6570\u53ea\u5728\u6309\u538b\u65f6\u53d8
-                if (compressionCount != _lastCountValue || targetCompressions != _lastCountTarget)
+                if (compressionCount != _lastCountValue || EffectiveTargetCompressions != _lastCountTarget)
                 {
                     _lastCountValue = compressionCount;
-                    _lastCountTarget = targetCompressions;
+                    _lastCountTarget = EffectiveTargetCompressions;
 
                     _mergedCprCountValueRuntime.text = string.Format(
                         LanguageManager.Get(
                             "\u8fdb\u5ea6\uff1a{0}/{1}",
                             "\u9032\u6357\uff1a{0}/{1}",
                             "Progress: {0}/{1}"),
-                        compressionCount, targetCompressions);
+                        compressionCount, EffectiveTargetCompressions);
                 }
             }
 
@@ -4375,9 +5522,8 @@ namespace CPRSimulation.Game
             HideAllPanels();
             if (panel != null)
                 panel.SetActive(true);
-            // 完成界面时隐藏语言选择按钮（避免遮挡结果显示和操作按钮）
-            if (_languageSelectPanel != null)
-                _languageSelectPanel.SetActive(panel != completionPanel);
+            // 完成界面时隐藏语言/说明/放置这一组外围控件（避免遮挡结果和操作按钮）
+            SetSelectionChromeVisible(panel != completionPanel);
         }
 
         private void HideAllPanels()
@@ -4386,6 +5532,29 @@ namespace CPRSimulation.Game
             if (startTrainingPanel != null) startTrainingPanel.SetActive(false);
             if (trainingHUDPanel != null) trainingHUDPanel.SetActive(false);
             if (completionPanel != null) completionPanel.SetActive(false);
+            // 选了训练模式就说明说明看完了，别让它挡在训练画面前面
+            HideControlsGuide();
+
+            // 通气面板不是「训练面板」之一，但中途退出/训练结束时它必须跟着收起
+            if (_ventilationPanel != null)
+                _ventilationPanel.SetActive(false);
+            _awaitingVentilation = false;
+
+            // 意识确认同理，而且它还带着两样必须回收的东西：挂在患者肩骨上的检测球，
+            // 和正在占用的麦克风。中途退出会走 StopAllCoroutines()，
+            // WaitForResponseCheck 里的清理代码根本不会执行，只能在这里兜。
+            if (_responseCheckPanel != null)
+                _responseCheckPanel.SetActive(false);
+            _responseCheckDone = true;
+            EndResponseVoiceMonitoring();
+            TeardownResponseCheckDetector();
+
+            // 训练开始就退出放置模式，否则地面轮廓会一直留在场景里。
+            // 这里不走 EndPatientPlacement()：那个会把选择面板重新打开。
+            if (_patientPlacement != null && _patientPlacement.IsPlacing)
+                _patientPlacement.CancelPlacement();
+            if (_placementPanel != null)
+                _placementPanel.SetActive(false);
         }
 
         private void PlaySound(AudioClip clip)
@@ -4439,8 +5608,8 @@ namespace CPRSimulation.Game
 
             if (patientModel != null)
             {
-                patientModel.transform.position = patientStandPosition;
-                patientModel.transform.rotation = patientStandRotation;
+                patientModel.transform.localPosition = patientStandLocalPosition;
+                patientModel.transform.localRotation = patientStandLocalRotation;
 
                 var rb = patientModel.GetComponent<Rigidbody>();
                 if (rb != null)

@@ -211,6 +211,190 @@ public static class CPRTextLibrary
             "Quest 3 + ハンドトラッキング",
             "Quest 3 + Hand Tracking");
 
+    // ---------- 操作说明 ----------
+    public static string ControlsGuideTitle =>
+        LanguageManager.Get("操作方法", "操作方法", "How to Use");
+
+    /// <summary>
+    /// 开场操作说明正文。手部追踪和手柄两条输入路径在代码里是并存的
+    /// （VRUIPointer 每帧按 OVRInput.IsControllerConnected 自动切换射线起点，
+    /// CPRPressDetector 的 IsHandCollider 同时接受手骨和 HandAnchor），
+    /// 但之前没有任何界面告诉用户这件事。
+    /// </summary>
+    public static string ControlsGuideBody =>
+        LanguageManager.Get(
+            "■ 菜单操作（手势 / 手柄都可以）\n" +
+            "  ・手势：用食指直接按按钮，或捏合拇指和食指点击射线指向处\n" +
+            "  ・手柄：按右手扳机键\n" +
+            "  ・放下手柄会自动切回手势，无需重启\n" +
+            "\n" +
+            "■ 胸外按压\n" +
+            "  ・把掌根放在患者胸部中央的检测区，垂直向下按\n" +
+            "  ・建议用手势按压：手柄的握持点和掌根有偏差，深度与回弹判定会不准\n" +
+            "  ・目标：深度 5–6 cm，频率 100–120 次/分，每次压完让胸部完全回弹",
+
+            "■ メニュー操作（ハンド / コントローラ どちらでも可）\n" +
+            "  ・ハンド：人差し指でボタンを直接押す、または親指と人差し指でつまむ（ピンチ）\n" +
+            "  ・コントローラ：右手の人差し指トリガー\n" +
+            "  ・コントローラを置くと自動的にハンドに切り替わります（再起動不要）\n" +
+            "\n" +
+            "■ 胸骨圧迫\n" +
+            "  ・手のひらの付け根を患者の胸の中央（検出エリア）に当て、まっすぐ押し下げます\n" +
+            "  ・圧迫はハンドトラッキング推奨：コントローラでは握り位置がずれ、深さとリコイルの判定が不正確になります\n" +
+            "  ・目標：深さ 5〜6 cm、テンポ 100〜120 回/分、1回ごとに胸を完全に戻す",
+
+            "■ Menus (hands or controller - both work)\n" +
+            "  - Hands: poke a button with your index finger, or pinch thumb + index to click\n" +
+            "  - Controller: right index trigger\n" +
+            "  - Put the controller down and it switches back to hands automatically (no restart)\n" +
+            "\n" +
+            "■ Chest compressions\n" +
+            "  - Place the heel of your palm on the centre of the chest and press straight down\n" +
+            "  - Hand tracking is recommended: a held controller offsets depth and recoil readings\n" +
+            "  - Target: 5-6 cm deep, 100-120/min, let the chest recoil fully each time");
+
+    public static string BtnControlsGuide =>
+        LanguageManager.Get("操作说明", "操作方法", "How to Use");
+
+    public static string BtnGotIt =>
+        LanguageManager.Get("知道了", "確認", "Got it");
+
+    // ---------- 人工呼吸（30:2） ----------
+    public static string BtnGiveBreath =>
+        LanguageManager.Get("完成一次吹气", "1 回送気した", "Breath given");
+
+    /// <summary>
+    /// 通气阶段的提示。每帧调用（要刷新已停顿秒数），所以先取格式串再格式化一次，
+    /// 不能让 LanguageManager.Get 的三个实参各插值一遍。
+    /// </summary>
+    public static string VentilationPrompt(int perCycle, int breaths, int remaining, float elapsedSec)
+    {
+        return string.Format(
+            LanguageManager.Get(
+                "已完成 {0} 次按压 —— 现在做 {1} 次人工呼吸\n" +
+                "・仰头抬颏打开气道，每次吹气约 1 秒，见到胸廓抬起即可\n" +
+                "・还需 {2} 次\n" +
+                "・已中断 {3:F1} 秒（指南要求 10 秒以内，然后立刻恢复按压）",
+
+                "{0} 回の圧迫が完了 —— 人工呼吸を {1} 回行ってください\n" +
+                "・頭部後屈あご先挙上で気道を確保し、1 回約 1 秒、胸の上がりが見える程度に\n" +
+                "・あと {2} 回\n" +
+                "・中断 {3:F1} 秒（ガイドラインは 10 秒未満。終わったらすぐ圧迫を再開）",
+
+                "{0} compressions done - now give {1} rescue breaths\n" +
+                "- Head tilt / chin lift, about 1 second per breath, just enough for chest rise\n" +
+                "- {2} to go\n" +
+                "- Paused {3:F1} s (guidelines say under 10 s, then resume compressions immediately)"),
+            perCycle, breaths, remaining, elapsedSec);
+    }
+
+    // ---------- 意识确认（反応の確認） ----------
+    public static string ResponseCheckTitle =>
+        LanguageManager.Get("确认意识", "反応の確認", "Check for a Response");
+
+    public static string BtnSkipResponseCheck =>
+        LanguageManager.Get("跳过这一步", "このステップを飛ばす", "Skip this step");
+
+    /// <summary>
+    /// 意识确认阶段的提示。每帧调用（要刷新肩部进度和秒数），
+    /// 所以先取格式串再格式化一次，不能让 LanguageManager.Get 的实参各插值一遍。
+    /// </summary>
+    public static string ResponseCheckPrompt(string leftMark, string rightMark, string voiceLine, float elapsedSec)
+    {
+        return string.Format(
+            LanguageManager.Get(
+                "轻拍患者双肩并大声呼唤「你没事吧？」\n" +
+                "・左肩 {0}　　右肩 {1}\n" +
+                "{2}" +
+                "・已用时 {3:F1} 秒（指南要求迅速判断，不超过 10 秒）",
+
+                "患者の両肩を軽くたたき、大声で「大丈夫ですか？」と呼びかけてください\n" +
+                "・左肩 {0}　　右肩 {1}\n" +
+                "{2}" +
+                "・経過 {3:F1} 秒（ガイドラインは 10 秒以内での迅速な判断）",
+
+                "Tap both shoulders and shout \"Are you all right?\"\n" +
+                "- Left {0}   Right {1}\n" +
+                "{2}" +
+                "- {3:F1} s elapsed (guidelines call for a check within 10 s)"),
+            leftMark, rightMark, voiceLine, elapsedSec);
+    }
+
+    /// <summary>呼唤检测的那一行。麦克风不可用时返回空串，整行不显示。</summary>
+    public static string ResponseCheckVoiceLine(bool micAvailable, bool heard)
+    {
+        if (!micAvailable)
+            return string.Empty;
+
+        return heard
+            ? LanguageManager.Get("・已听到呼唤 ✓\n", "・呼びかけを確認 ✓\n", "- Call heard ✓\n")
+            : LanguageManager.Get("・还没听到呼唤\n", "・呼びかけがまだ聞こえません\n", "- No call heard yet\n");
+    }
+
+    public static string ResponseCheckMarkDone =>
+        LanguageManager.Get("✓", "✓", "✓");
+
+    public static string ResponseCheckMarkPending =>
+        LanguageManager.Get("—", "—", "—");
+
+    // ---------- 患者放置 ----------
+    public static string BtnPlacePatient =>
+        LanguageManager.Get("调整患者位置", "患者の位置を調整", "Move Patient");
+
+    public static string PlacementTitle =>
+        LanguageManager.Get("选择放置位置", "設置場所を選択", "Choose a Spot");
+
+    public static string PlacementBody =>
+        LanguageManager.Get(
+            "用手（或手柄）指向地面上的一块空地，绿色轮廓就是患者躺下后的占地范围。\n" +
+            "・请选一块真实房间里没有家具的地面 —— 否则按压时会碰到桌椅\n" +
+            "・右摇杆左右拨可以旋转朝向\n" +
+            "・轮廓变红表示超出可用范围\n" +
+            "选好后按「确定」。",
+
+            "手（またはコントローラ）で床の空いている場所を指してください。緑の枠が患者の占有範囲です。\n" +
+            "・実際の部屋で家具のない床を選んでください（圧迫時に机や椅子に当たるのを防ぐため）\n" +
+            "・右スティックを左右に倒すと向きを回転できます\n" +
+            "・枠が赤い場合は範囲外です\n" +
+            "決まったら「確定」を押してください。",
+
+            "Point at an empty patch of floor with your hand (or controller). The green outline is the space the patient will take up.\n" +
+            "- Pick floor that is clear of real furniture, or you will hit it while compressing\n" +
+            "- Push the right thumbstick left/right to rotate\n" +
+            "- A red outline means the spot is out of range\n" +
+            "Press Confirm when you are happy with it.");
+
+    public static string BtnConfirmPlacement =>
+        LanguageManager.Get("确定", "確定", "Confirm");
+
+    public static string BtnCancelPlacement =>
+        LanguageManager.Get("取消", "キャンセル", "Cancel");
+
+    // ---------- 地震场景世界UI ----------
+    // 这块白板是整个训练的入口：按下去 → 地震 → 有人倒地 → 自动进入急救流程。
+    // 原来标签只写「地震開始」，学员看不出这是训练的开始按钮，
+    // 实机反馈直接问「这个地震按钮是干什么的」。标签和说明一起改成讲清楚用途的写法。
+    public static string BtnStartEarthquake =>
+        LanguageManager.Get("开始训练（地震情景）", "訓練開始（地震想定）", "Start Drill (Earthquake)");
+
+    public static string EarthquakeReady =>
+        LanguageManager.Get(
+            "训练情景：地震发生后现场急救\n按下按钮后会发生地震，随后出现伤者\n请对倒地者实施心肺复苏",
+            "訓練シナリオ：地震発生後の救命処置\nボタンを押すと地震が起こり、負傷者が発生します\n倒れた人に心肺蘇生を行ってください",
+            "Scenario: first aid after an earthquake\nPressing the button triggers a quake, then a casualty appears\nPerform CPR on the collapsed person");
+
+    public static string EarthquakeShaking =>
+        LanguageManager.Get(
+            "地震发生中\n请压低身体，注意周围坠落物",
+            "地震発生中\n姿勢を低く保ち、周囲の危険物に注意",
+            "Earthquake in progress\nStay low and watch for falling objects");
+
+    public static string EarthquakeFinished =>
+        LanguageManager.Get(
+            "地震结束\n发现伤者，开始急救处置",
+            "地震終了\n負傷者を発見、救命処置を開始します",
+            "Earthquake over\nA casualty is found - begin first aid");
+
     // ---------- 语言选择按钮标签（固定，不随语言变化） ----------
     public const string LangBtnChinese  = "中文";
     public const string LangBtnJapanese = "日本語";

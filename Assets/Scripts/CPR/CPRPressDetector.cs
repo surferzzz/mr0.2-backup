@@ -125,6 +125,24 @@ namespace CPRSimulation
                  "没有这个超时的话，倚靠会让按压永远不结束，计数和频率随之停止。")]
         public float maxPressDurationSec = 1.5f;
 
+        [Header("按压位置")]
+        [Tooltip("掌根偏离胸骨中点（chestSurface 原点）超过此距离则判定为位置不当。" +
+                 "指南要求按压胸骨下半部；偏上压到胸骨柄、偏下压到剑突、偏外压到肋骨都会造成损伤且无效。" +
+                 "检测区本身就是个盒子，落在盒里不等于落在正确的点上，所以要单独量偏移。")]
+        public float positionToleranceCm = 4f;
+
+        /// <summary>上一次按压在最深点时，掌根偏离胸骨中点的水平距离(cm)。</summary>
+        public float LastOffsetCm => _lastOffsetCm;
+
+        /// <summary>上一次按压的位置是否偏离超标。</summary>
+        public bool LastOffTarget => _lastOffTarget;
+
+        /// <summary>
+        /// 位置偏移评价：(偏移cm, 是否超标)。和 OnRecoilEvaluated 一样单开事件，
+        /// 不去改 OnCompressionComplete 那个多处订阅的签名。
+        /// </summary>
+        public event Action<float, bool> OnPositionEvaluated;
+
         // 事件
         public event Action<float> OnDepthChanged;
         public event Action OnCompressionStart;
@@ -156,6 +174,12 @@ namespace CPRSimulation
         private float _pressStartTime;
         private float _lastRecoilDeficitCm;
         private bool _lastRecoilIncomplete;
+        // 位置偏移：每帧算当前值，按压过程中记下「最深点那一刻」的值。
+        // 用最深点而不是平均值，因为真正把力传到胸骨的就是那一瞬间。
+        private float _currentOffsetCm;
+        private float _offsetAtPeakCm;
+        private float _lastOffsetCm;
+        private bool _lastOffTarget;
         private Vector3 _smoothedPalmPos;
         private bool _isPressing;
         private float _lastCompressionTime = -1f;
@@ -201,6 +225,8 @@ namespace CPRSimulation
             _hasRestPoint = true;
             _absDepthCm = 0f;
             _lastRecoilDeficitCm = 0f;
+            _lastOffsetCm = 0f;
+            _lastOffTarget = false;
             _lastRecoilIncomplete = false;
             _smoothedPalmPos = Vector3.zero;
             _hasDynamicRest = false;
@@ -257,6 +283,8 @@ namespace CPRSimulation
             _currentRateBPM = 0f;
             _lastCompressionTime = -1f;
             _lastRecoilDeficitCm = 0f;
+            _lastOffsetCm = 0f;
+            _lastOffTarget = false;
             _lastRecoilIncomplete = false;
         }
 
@@ -365,33 +393,11 @@ namespace CPRSimulation
             }
         }
 
+        // 判定本体已抽到 HandColliderUtil：意识确认的肩部检测要用同一套规则，
+        // 复制一份迟早走样。
         private bool IsHandCollider(Collider col)
         {
-            // 检查层级（若设置了手部专用 Layer）
-            if (handLayerMask != -1 && ((1 << col.gameObject.layer) & handLayerMask) == 0)
-                return false;
-
-            // Meta/OVR：碰撞体在 LeftHandAnchor / RightHandAnchor 下即视为手
-            Transform t = col.transform;
-            while (t != null)
-            {
-                string p = t.name;
-                if (p.Contains("LeftHandAnchor") || p.Contains("RightHandAnchor") ||
-                    p.Contains("HandAnchor") || p.Contains("HandTracking"))
-                    return true;
-                t = t.parent;
-            }
-
-            // 通过名称或 tag 判断
-            string name = col.name.ToLower();
-            if (name.Contains("hand") || name.Contains("palm") || name.Contains("hands") ||
-                name.Contains("finger") || name.Contains("poke") || name.Contains("wrist") ||
-                name.Contains("bone") || name.Contains("customhand"))
-                return true;
-            if (col.CompareTag("Hand") || col.CompareTag("Player"))
-                return true;
-
-            return false;
+            return HandColliderUtil.IsHandCollider(col, handLayerMask);
         }
 
         private void UpdateDepthFromCollision(Vector3 handPosition)
@@ -429,6 +435,14 @@ namespace CPRSimulation
                 : chestSurface.position + axis * compressionApproachHeight;
 
             _absDepthCm = Mathf.Max(0f, Vector3.Dot(restPoint - handPosition, axis)) * 100f;
+
+            // 位置偏移：把「手到胸骨中点」的向量里沿按压轴的分量去掉，
+            // 剩下的就是贴着胸面的横向偏移 —— 压得深不该被算成压偏。
+            if (chestSurface != null)
+            {
+                Vector3 toHand = handPosition - chestSurface.position;
+                _currentOffsetCm = Vector3.ProjectOnPlane(toHand, axis).magnitude * 100f;
+            }
 
             if (useDynamicRestCalibration)
             {
@@ -497,14 +511,19 @@ namespace CPRSimulation
                 {
                     _isPressing = true;
                     _peakDepthThisPress = rawDepthCm;
+                    _offsetAtPeakCm = _currentOffsetCm;
                     _pressStartTime = Time.time;
                     OnCompressionStart?.Invoke();
                 }
             }
             else
             {
-                // 按压中：用原始深度记录真实峰值
-                _peakDepthThisPress = Mathf.Max(_peakDepthThisPress, rawDepthCm);
+                // 按压中：用原始深度记录真实峰值，顺带记下峰值那一刻的位置偏移
+                if (rawDepthCm > _peakDepthThisPress)
+                {
+                    _peakDepthThisPress = rawDepthCm;
+                    _offsetAtPeakCm = _currentOffsetCm;
+                }
 
                 // 回弹到释放阈值以下才算一次结束
                 if (smoothedDepthCm <= releaseDepthCm)
@@ -534,9 +553,13 @@ namespace CPRSimulation
             _lastRecoilDeficitCm = _absDepthCm;
             _lastRecoilIncomplete = _absDepthCm > recoilToleranceCm;
 
+            _lastOffsetCm = _offsetAtPeakCm;
+            _lastOffTarget = _offsetAtPeakCm > positionToleranceCm;
+
             _currentDepthCm = 0f;
             RecordCompression();
             OnRecoilEvaluated?.Invoke(_lastRecoilDeficitCm, _lastRecoilIncomplete);
+            OnPositionEvaluated?.Invoke(_lastOffsetCm, _lastOffTarget);
             OnCompressionEnd?.Invoke();
         }
 
