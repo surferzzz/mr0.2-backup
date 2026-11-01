@@ -1,42 +1,25 @@
 /**
- * VR-CPR 研究：Google フォームを 3 本まとめて作る Apps Script。
+ * VR-CPR 研究：体験後アンケートを作る Apps Script。
  *
  * 使い方
  *   1. https://script.google.com で新しいプロジェクトを作る
  *   2. このファイルの中身をぜんぶ貼り付けて保存
- *   3. 関数 createAllForms を選んで実行（初回は認可を求められる）
- *   4. 実行ログに出る 4 本の URL を控える
+ *   3. 関数 createSurvey を選んで実行（初回は認可を求められる）
+ *   4. 実行ログに出る URL を控える
+ *   5. 2026-11-02 に作った古いフォーム 3 本は retireOldForms で止める
  *
- * 作られるもの
- *   - スプレッドシート 1 冊（3 本ぶんの回答が別タブに入る）
- *   - 事前アンケート（CPR 経験で分岐）
- *   - 体験後アンケート（1 人 1 回）
+ * 設計（questionnaire_visual_vs_haptic.md と対応）
+ *   - 被験者間：1 人は A（画面だけ）か B（画面＋手の振動）の一方だけを体験する
+ *   - 参加者 50 人（各群 25 人）
+ *   - 質問紙は体験後の 1 本だけ。事前アンケートは廃止したので、
+ *     自己効力感は「体験後の水準」を群間で比べる。変化量は出せない。
+ *   - 尺度はすべて 0〜10（NASA-TLX にそろえた）
  *
- * 設計の根拠は questionnaire_visual_vs_haptic.md を見ること。
  * 項目コード（SE1, SUS3 …）は質問文の先頭に埋め込んである。これが無いと
  * スプレッドシートの列名が質問文そのままになり、集計時にどの列か分からなくなる。
  */
 
 var SHEET_NAME = 'VR-CPR 研究 回答データ';
-
-// 事前と事後で一字一句そろえる必要がある（対応のある比較に使うため）。
-// 片方だけ直すと列が別物になって突き合わせられなくなるので、ここで 1 回だけ定義する。
-var SELF_EFFICACY_ROWS = [
-  'SE1. 人が倒れていたら、落ち着いて対応できる',
-  'SE2. 胸を押す正しい位置がわかる',
-  'SE3. ちょうどよい深さ（5 cm くらい）で押せる',
-  'SE4. ちょうどよい速さ（1 分間に 100〜120 回）を保てる',
-  'SE5. AED を正しく使える',
-  'SE6. 本当の場面で、行動する自信がある'
-];
-
-var SSQ_ROWS = [
-  'SSQ1. 気分が悪い',
-  'SSQ2. 目が疲れている',
-  'SSQ3. 頭が痛い',
-  'SSQ4. めまいがする',
-  'SSQ5. 吐き気がする'
-];
 
 // 全部の尺度を NASA-TLX にそろえて 0〜10 の評価にしてある。
 // 答える側の手が一つで済み、集計も列をまたいで素直に比べられる。
@@ -49,69 +32,81 @@ var SSQ_HELP = '0 = ぜんぜんない　／　10 = とても強い';
 
 // ───────────────────────────────── entry point
 
-function createAllForms() {
+function createSurvey() {
   var ss = SpreadsheetApp.create(SHEET_NAME);
-
-  var pre = createPreForm_(ss.getId());
-  var post = createPostForm_(ss.getId());
+  var form = buildPostForm_(ss.getId());
 
   var out = [
     '',
     '===== できあがり =====',
     '回答データ（スプレッドシート）: ' + ss.getUrl(),
     '',
-    '[1] 事前アンケート',
-    '    回答用: ' + pre.getPublishedUrl(),
-    '    編集用: ' + pre.getEditUrl(),
-    '[2] 体験後アンケート（1 人 2 回）',
-    '    回答用: ' + post.getPublishedUrl(),
-    '    編集用: ' + post.getEditUrl(),
+    '体験後アンケート（1 人 1 回）',
+    '    回答用: ' + form.getPublishedUrl(),
+    '    編集用: ' + form.getEditUrl(),
     '',
-    '※ 本番の前に、自分で 2 周ぶんダミー回答してシートの列を必ず確認すること。'
+    '※ 本番の前に、自分でダミー回答を入れてシートの列を必ず確認すること。',
+    '※ 古いフォーム 3 本は retireOldForms で止める。'
   ].join('\n');
 
   Logger.log(out);
   return out;
 }
 
-// ───────────────────────────────── 1. 事前アンケート
+// ───────────────────────────────── 体験後アンケート（これ 1 本）
 
-function createPreForm_(spreadsheetId) {
-  var form = FormApp.create('【VR-CPR 研究】事前アンケート');
+function buildPostForm_(spreadsheetId) {
+  var form = FormApp.create('【VR-CPR 研究】体験後アンケート');
   applyCommonSettings_(form);
 
   form.setDescription(
     'この研究について\n\n' +
     'VR（ゴーグル）を使った心肺蘇生（CPR）の練習で、\n' +
     '手に振動があると学びやすくなるかどうかを調べています。\n\n' +
-    '・時間：体験とあわせて約45分です。アンケートは1回5分くらいです。\n' +
+    '・このアンケートは体験のあとに 1 回だけお答えいただきます。7 分くらいです。\n' +
     '・答えは匿名です。名前や学籍番号は聞きません。\n' +
     '・答えた内容が成績に関係することはありません。\n' +
-    '・気分が悪くなったら、いつでもやめられます。\n' +
-    '・途中でやめても、不利になることはありません。\n\n' +
+    '・答えたくない質問は飛ばしてかまいません。\n' +
+    '・いつでも参加をやめられます。やめても不利になることはありません。\n\n' +
     'わからないことがあれば、担当者に聞いてください。'
   );
 
-  // 同意は 1 ページ目（ページ区切りの前）に置く
+  // ── P1 同意（ページ区切りの前＝1 ページ目） ──
   var consent = form.addMultipleChoiceItem()
     .setTitle('CONSENT. 説明を読みました。この研究に参加します。')
     .setRequired(true);
 
-  // 先にページを全部作ってから分岐を結ぶ
-  var secBasic = form.addPageBreakItem().setTitle('あなたについて');
-  addItem_(form, 'D1. 参加者ID（担当者から聞いた番号）', 'text', { required: true });
+  // ── P2 あなたについて ──
+  var secAbout = form.addPageBreakItem().setTitle('あなたについて');
+  addItem_(form, 'P1. 参加者ID（担当者から聞いた番号）', 'text', { required: true });
+  // 被験者間なので、これは「今回どちらか」ではなく割り付けられた群の記録。
+  addItem_(form, 'P2. 体験したやり方', 'radio', {
+    required: true,
+    choices: ['A：画面の表示だけ（振動なし）', 'B：画面の表示＋手の振動']
+  });
   addItem_(form, 'D2. 年齢', 'text', {});
   addItem_(form, 'D3. 性別', 'radio', { choices: ['男性', '女性', 'その他', '答えない'] });
   addItem_(form, 'D4. 所属', 'radio', { choices: ['学部', '大学院', 'その他'] });
   addItem_(form, 'D6. メガネ・コンタクトを使っていますか', 'radio', {
     choices: ['使っていない', 'メガネ', 'コンタクト']
   });
+  addItem_(form, 'V1. VR のゴーグルを使ったことがありますか', 'radio', {
+    choices: ['今回が初めて', '1〜2 回', '3〜10 回', '10 回以上・よく使う']
+  });
+  addItem_(form, 'V2. 振動する機器（触覚デバイス）を使ったことがありますか', 'radio', {
+    choices: ['ない', 'ゲームのコントローラくらい', '専用の機器を使ったことがある']
+  });
+  addItem_(form, 'V4. 乗り物に酔いやすいですか', 'radio', {
+    choices: ['まったく酔わない', 'あまり酔わない', '少し酔う', 'よく酔う']
+  });
 
-  var secExpQ = form.addPageBreakItem().setTitle('CPR の経験');
+  // ── P3 CPR の経験（分岐の要） ──
+  form.addPageBreakItem().setTitle('CPR の経験');
   var expGate = form.addMultipleChoiceItem()
     .setTitle('EXP0. CPR（心肺蘇生）の講習を受けたことがありますか')
     .setRequired(true);
 
+  // ── P4 CPR の経験（くわしく） ──
   var secExpDetail = form.addPageBreakItem().setTitle('CPR の経験（くわしく）');
   addItem_(form, 'EXP1. どんな講習を受けましたか（あてはまるものすべて）', 'checkbox', {
     choices: ['BLS（AHA/JRC）', 'ICLS', 'ACLS', '普通救命講習（消防）', '大学の授業・実習',
@@ -132,62 +127,9 @@ function createPreForm_(spreadsheetId) {
   addItem_(form, 'EXP7. AED を使ったことがありますか（練習用もふくみます）', 'radio',
     { choices: ['ある', 'ない'] });
 
-  var secVr = form.addPageBreakItem().setTitle('VR・機器の経験');
-  addItem_(form, 'V1. VR のゴーグルを使ったことがありますか', 'radio', {
-    choices: ['今回が初めて', '1〜2 回', '3〜10 回', '10 回以上・よく使う']
-  });
-  addItem_(form, 'V2. 振動する機器（触覚デバイス）を使ったことがありますか', 'radio', {
-    choices: ['ない', 'ゲームのコントローラくらい', '専用の機器を使ったことがある']
-  });
-  // V3（ゲーム頻度）は削除した。欠番は埋めない——番号を詰めると
-  // 既に書いた集計スクリプトや文書との対応が崩れるため。
-  addItem_(form, 'V4. 乗り物に酔いやすいですか', 'radio', {
-    choices: ['まったく酔わない', 'あまり酔わない', '少し酔う', 'よく酔う']
-  });
-
-  form.addPageBreakItem().setTitle('今の自信');
-  likertGrid_(form, '今のお気持ちについて答えてください', AGREE_HELP, SELF_EFFICACY_ROWS, RATING_COLS);
-
-  form.addPageBreakItem().setTitle('今の体調');
-  likertGrid_(form, '今の体調について答えてください',
-    SSQ_HELP + '（体験の前の状態を記録しておくためのものです）',
-    SSQ_ROWS, RATING_COLS);
-
-  // 分岐を結ぶ
-  consent.setChoices([
-    consent.createChoice('はい', secBasic),
-    consent.createChoice('いいえ', FormApp.PageNavigationType.SUBMIT)
-  ]);
-  expGate.setChoices([
-    expGate.createChoice('はい', secExpDetail),
-    expGate.createChoice('いいえ', secVr)
-  ]);
-  // 「くわしく」を答え終わったら VR のページへ（経験なしの人と合流する）
-  secExpDetail.setGoToPage(secVr);
-
-  form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheetId);
-  return form;
-}
-
-// ───────────────────────────────── 2. 体験後アンケート
-
-function createPostForm_(spreadsheetId) {
-  var form = FormApp.create('【VR-CPR 研究】体験後アンケート');
-  applyCommonSettings_(form);
-
-  form.setDescription('いま体験した練習について答えてください。');
-
-  addItem_(form, 'P1. 参加者ID', 'text', { required: true });
-  // 被験者間計画なので、P2 は「今回どちらだったか」ではなく群の記録。
-  // 参加者はどちらか一方しか体験しない。
-  addItem_(form, 'P2. 体験したやり方', 'radio', {
-    required: true,
-    choices: ['A：画面の表示だけ（振動なし）', 'B：画面の表示＋手の振動']
-  });
-
-  form.addPageBreakItem().setTitle('使いやすさ');
-  likertGrid_(form, 'このシステムについて答えてください',
-    AGREE_HELP,
+  // ── P5 使いやすさ（SUS） ──
+  var secSus = form.addPageBreakItem().setTitle('使いやすさ');
+  likertGrid_(form, 'このシステムについて答えてください', AGREE_HELP,
     [
       'SUS1. このシステムをまた使いたいと思う',
       'SUS2. このシステムは、必要以上に複雑だと思った',
@@ -202,6 +144,7 @@ function createPostForm_(spreadsheetId) {
     ],
     RATING_COLS);
 
+  // ── P6 大変さ（NASA-TLX） ──
   form.addPageBreakItem().setTitle('大変さ');
   likertGrid_(form, '今回の練習の大変さについて答えてください',
     '0 = ぜんぜん　／　10 = とても',
@@ -213,8 +156,9 @@ function createPostForm_(spreadsheetId) {
       'TLX5. がんばり：どれくらいがんばりましたか',
       'TLX6. いらだち：どれくらいイライラ・不安を感じましたか'
     ],
-    range_(0, 10));
+    RATING_COLS);
 
+  // ── P7 リアルさ ──
   form.addPageBreakItem().setTitle('リアルさ・手の感覚');
   likertGrid_(form, '今回の練習について答えてください', AGREE_HELP,
     [
@@ -229,9 +173,10 @@ function createPostForm_(spreadsheetId) {
     ],
     RATING_COLS);
 
-  // 条件 B 専用。分岐ではなく「任意回答」にしてある。
-  // P2 で分岐させると SUS・TLX・リアルさまで 2 本に複製する羽目になり、
-  // つけ間違えたときに回答が丸ごと飛ぶ。空欄なら集計で落とせばいいだけ。
+  // ── P8 手の振動（B 群だけ・任意） ──
+  // 分岐ではなく「任意回答」にしてある。P2 で分岐させると SUS・TLX・リアルさまで
+  // A 用と B 用に二重化する羽目になり、つけ間違えると回答が丸ごと飛ぶ。
+  // 空欄なら集計で落とせばいいだけ。
   form.addPageBreakItem()
     .setTitle('手の振動について')
     .setHelpText(
@@ -249,7 +194,7 @@ function createPostForm_(spreadsheetId) {
       'HP7. 振動が気になって、かえって集中できなかった',
       'HP8. 次も振動のあるほうで練習したい'
     ],
-    RATING_COLS, false);   // 必須にしない
+    RATING_COLS, false);
 
   // 双極尺度。5 が「ちょうどよい」なので、他のグリッドに混ぜると平均が無意味になる。
   // 分析では |HP9 - 5| を「ちょうどよさからのズレ」として扱う。
@@ -259,176 +204,84 @@ function createPostForm_(spreadsheetId) {
     .setLabels('弱すぎる', '強すぎる')
     .setRequired(false);
 
-  form.addPageBreakItem().setTitle('体験の後の自信');
+  // ── P9 今の自信 ──
+  // 事前アンケートを廃止したので、これは「体験後の水準」。変化量は出せない。
+  // 無作為割付なので、群間の比較としては成立する。
+  form.addPageBreakItem().setTitle('今の自信');
   likertGrid_(form, '今のお気持ちについて答えてください', AGREE_HELP,
-    SELF_EFFICACY_ROWS, RATING_COLS);
+    [
+      'SE1. 人が倒れていたら、落ち着いて対応できる',
+      'SE2. 胸を押す正しい位置がわかる',
+      'SE3. ちょうどよい深さ（5 cm くらい）で押せる',
+      'SE4. ちょうどよい速さ（1 分間に 100〜120 回）を保てる',
+      'SE5. AED を正しく使える',
+      'SE6. 本当の場面で、行動する自信がある'
+    ],
+    RATING_COLS);
 
+  // ── P10 今の体調 ──
   form.addPageBreakItem().setTitle('今の体調');
-  likertGrid_(form, '今の体調について答えてください', SSQ_HELP, SSQ_ROWS, RATING_COLS);
+  likertGrid_(form, '今の体調について答えてください', SSQ_HELP,
+    [
+      'SSQ1. 気分が悪い',
+      'SSQ2. 目が疲れている',
+      'SSQ3. 頭が痛い',
+      'SSQ4. めまいがする',
+      'SSQ5. 吐き気がする'
+    ],
+    RATING_COLS);
 
+  // ── P11 自由記述 ──
   form.addPageBreakItem().setTitle('自由に書いてください');
   addItem_(form, 'F1. よかったところ、役に立ったところを書いてください', 'paragraph', {});
   addItem_(form, 'F2. 使いにくかったところ、直してほしいところを書いてください', 'paragraph', {});
   addItem_(form, 'F3. おかしいと思ったところ（不具合）があれば書いてください', 'paragraph', {});
 
+  // ── 分岐を結ぶ（ページを全部作ってから） ──
+  consent.setChoices([
+    consent.createChoice('はい', secAbout),
+    consent.createChoice('いいえ', FormApp.PageNavigationType.SUBMIT)
+  ]);
+  expGate.setChoices([
+    expGate.createChoice('はい', secExpDetail),
+    expGate.createChoice('いいえ', secSus)      // 経験なしは「くわしく」を飛ばす
+  ]);
+  secExpDetail.setGoToPage(secSus);             // 答え終わったら合流
+
   form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheetId);
   return form;
 }
 
-// ───────────────────────────────── 3.（削除）くらべるアンケート
-//
-// 被験者間計画にしたので、A/B を直接くらべる質問紙は成立しない。
-// 参加者はどちらか一方しか体験しないため、「どちらが良かったか」に答えられない。
-// A 群と B 群の差は、事後アンケートの各尺度を独立標本で比較して見る。
+// ───────────────────────────────── 古いフォームを止める
 
-// ───────────────────────────────── 既存フォームの手直し
-
-// 2026-11-02 に作ったフォームの ID（編集用 URL の /d/ と /edit の間）
-var PRE_FORM_ID = '1FLUkhoAYiycuJbPG2Mefjfm6QdNUWAQLRVXmxmXSXmo';
-var POST_FORM_ID = '19bcDQxGRkwu7HbYy3Vvx2RNuZlf_Lkyb_aDqr7dEhBY';
-var COMPARE_FORM_ID = '1X72YP5FzarXnH_kSDWqSjTEa_btRo582f8yRVPkQ4q0';
+// 2026-11-02 に作った 3 本（ID は編集用 URL の /d/ と /edit の間）
+var OLD_PRE_FORM_ID = '1FLUkhoAYiycuJbPG2Mefjfm6QdNUWAQLRVXmxmXSXmo';
+var OLD_POST_FORM_ID = '19bcDQxGRkwu7HbYy3Vvx2RNuZlf_Lkyb_aDqr7dEhBY';
+var OLD_COMPARE_FORM_ID = '1X72YP5FzarXnH_kSDWqSjTEa_btRo582f8yRVPkQ4q0';
 
 /**
- * ★ これを実行する（URL は変わらない）。被験者間計画への変更をまとめて当てる：
- *
- *   共通   すべてのグリッドを 0〜10 の評価にそろえる（NASA-TLX に合わせる）
- *   事前   D4 を「学部 / 大学院 / その他」に差し替え、D5・D7・V3 を削除
- *   事後   P3「何回目ですか」を削除（1 人 1 回しか出さない）、
- *          P2 を「体験したやり方」に言い換え、HP9 を 0〜10 に（5 = ちょうどよい）
- *   比較   回答受付を停止してタイトルに【使用しない】を付ける
- *          （被験者間では A/B を直接くらべられないため。削除はしないので、
- *            要らなければ Drive で手で捨てること）
- *
- * 動作確認のダミー回答は消す。**本番の回答が 1 件でも入っていたら実行しないこと。**
- * 回答は復元できない。
+ * 古い 3 本の回答受付を止めて、タイトルに【使用しない】を付ける。
+ * 削除はしない——取り返しがつかないので、捨てるかどうかは人間が決める。
  */
-function applyAllChanges() {
+function retireOldForms() {
+  var ids = [OLD_PRE_FORM_ID, OLD_POST_FORM_ID, OLD_COMPARE_FORM_ID];
   var log = [];
 
-  log.push(patchForm_(PRE_FORM_ID, '事前', function (form) {
-    applyPreFormEdits_(form);
-  }));
-
-  log.push(patchForm_(POST_FORM_ID, '事後', function (form) {
-    var items = form.getItems();
-    for (var i = items.length - 1; i >= 0; i--) {
-      var title = items[i].getTitle() || '';
-
-      if (title.indexOf('P3.') === 0) {
-        form.deleteItem(items[i]);      // 被験者間なので「何回目」は無意味
-        continue;
+  for (var i = 0; i < ids.length; i++) {
+    try {
+      var form = FormApp.openById(ids[i]);
+      form.setAcceptingResponses(false);
+      if (form.getTitle().indexOf('【使用しない】') !== 0) {
+        form.setTitle('【使用しない】' + form.getTitle());
       }
-      if (title.indexOf('P2.') === 0) {
-        items[i].asMultipleChoiceItem().setTitle('P2. 体験したやり方');
-      }
-      if (title.indexOf('HP9.') === 0) {
-        items[i].asScaleItem()
-          .setTitle('HP9. 振動の強さはどうでしたか（5 = ちょうどよい）')
-          .setBounds(0, 10)
-          .setLabels('弱すぎる', '強すぎる');
-      }
+      log.push('止めた: ' + form.getTitle() + ' / ' + form.getEditUrl());
+    } catch (e) {
+      log.push('開けなかった（すでに削除済み？）: ' + ids[i] + ' — ' + e.message);
     }
-  }));
-
-  // 比較フォームは手直しせず、使えないようにして残す。
-  // 消すのは取り返しがつかないので、捨てるかどうかは人間が決める。
-  var cmp = FormApp.openById(COMPARE_FORM_ID);
-  cmp.setAcceptingResponses(false);
-  if (cmp.getTitle().indexOf('【使用しない】') !== 0) {
-    cmp.setTitle('【使用しない】' + cmp.getTitle());
   }
-  log.push('[比較] 回答受付を停止してタイトルに印を付けた（被験者間のため未使用）。' +
-    '要らなければ Drive で手で削除: ' + cmp.getEditUrl());
 
-  log.push(
-    '\n【あと 1 手だけ手作業】\n' +
-    'フォームの回答を消しても、スプレッドシート側の見出し行は残る。事前・事後それぞれで：\n' +
-    '  1. スプレッドシートで該当タブを右クリック →「削除」\n' +
-    '  2. フォームの「回答」タブ → 右上の ⋮ →「フォームのリンクを解除」\n' +
-    '  3. 同じところで緑のシートアイコン → 既存のスプレッドシートを選んで再リンク\n' +
-    'これで見出しが新しい質問構成で作り直される。'
-  );
-
+  log.push('\n不要なら Drive で手で削除すること。');
   Logger.log(log.join('\n'));
-}
-
-/** 回答を消す → 個別の手直し → グリッドを 0〜10 にそろえる、をまとめてやる。 */
-function patchForm_(formId, label, extraEdits) {
-  var form = FormApp.openById(formId);
-  var n = form.getResponses().length;
-  form.deleteAllResponses();
-
-  extraEdits(form);
-  var converted = convertGridsToRating_(form);
-
-  return '[' + label + '] 回答 ' + n + ' 件削除 / グリッド ' + converted + ' 個を 0〜10 に / ' +
-    form.getPublishedUrl();
-}
-
-/**
- * グリッドの列を 0〜10 に置き換え、説明文も合わせる。
- * 体調（SSQ）だけ文言が違うので行の中身で見分ける。
- */
-function convertGridsToRating_(form) {
-  var grids = form.getItems(FormApp.ItemType.GRID);
-  for (var i = 0; i < grids.length; i++) {
-    var g = grids[i].asGridItem();
-    var rows = g.getRows();
-    var isSsq = rows.length > 0 && rows[0].indexOf('SSQ1.') === 0;
-    var isCompare = rows.length > 0 && rows[0].indexOf('C1.') === 0;
-    var isTlx = rows.length > 0 && rows[0].indexOf('TLX1.') === 0;
-
-    g.setColumns(RATING_COLS);
-
-    if (isSsq) {
-      g.setHelpText(SSQ_HELP);
-    } else if (isCompare) {
-      g.setHelpText('0 = A のほうがずっとよい　／　5 = どちらも同じ　／　10 = B のほうがずっとよい');
-    } else if (isTlx) {
-      g.setHelpText('0 = ぜんぜん　／　10 = とても');
-    } else {
-      g.setHelpText(AGREE_HELP);
-    }
-  }
-  return grids.length;
-}
-
-function applyPreFormEdits_(form) {
-  var dropPrefixes = ['D5.', 'D7.', 'V3.'];
-  var items = form.getItems();
-  var removed = [];
-  var updated = [];
-
-  // 後ろから回す。前から消すと添字がずれる。
-  for (var i = items.length - 1; i >= 0; i--) {
-    var title = items[i].getTitle() || '';
-
-    if (hasAnyPrefix_(title, dropPrefixes)) {
-      form.deleteItem(items[i]);
-      removed.push(title);
-      continue;
-    }
-
-    if (title.indexOf('D4.') === 0) {
-      items[i].asMultipleChoiceItem()
-        .setTitle('D4. 所属')
-        .setChoiceValues(['学部', '大学院', 'その他']);
-      updated.push(title + ' → D4. 所属');
-    }
-  }
-
-  Logger.log([
-    '削除: ' + (removed.length ? removed.join(' / ') : 'なし'),
-    '変更: ' + (updated.length ? updated.join(' / ') : 'なし'),
-    '確認: ' + form.getPublishedUrl()
-  ].join('\n'));
-}
-
-function hasAnyPrefix_(text, prefixes) {
-  for (var i = 0; i < prefixes.length; i++) {
-    if (text.indexOf(prefixes[i]) === 0) return true;
-  }
-  return false;
 }
 
 // ───────────────────────────────── 共通処理
@@ -438,8 +291,6 @@ function applyCommonSettings_(form) {
   form.setAllowResponseEdits(false);
   form.setProgressBar(true);
   form.setShuffleQuestions(false);
-
-  // 体験後アンケートは 1 人が 2 回出すので、1 回制限は必ず外す。
   form.setLimitOneResponsePerUser(false);
 
   // 組織内限定を外す。大学アカウントだと既定で ON になっていて、
