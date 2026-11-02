@@ -16,7 +16,36 @@
 | 4 AED 只有总耗时 | **已解决** | `AEDTrainingRuntime.ResultTimeToPadsSeconds` / `ResultTimeToShockSeconds` |
 | 5 中断阈值要声明 | 未改 | 阈值已写进 CSV 的 `interruption_threshold_s` 列，可追溯；常量本身仍是 `3f` |
 
-未做：HUD 角落常驻显示 ID / 条件 / 轮次，以及 VR 内的 ID 输入面板（目前靠 `session_config.json`）。
+### 复查后补的五处（2026-11-02 第二轮）
+
+上一轮把采集代码写完了，但有两处会让数据静默失真 —— 画面一切正常，错误只在分析时才显形。
+
+| 问题 | 状态 | 实装 |
+|---|---|---|
+| A 记录器没挂进场景，**一行都不会落盘** | **已解决** | `TrainingDataLogger` 改为 `RuntimeInitializeOnLoadMethod` 自启动，不再依赖「记得挂」 |
+| B 意识确认的数据在写入前被清零 | **已解决** | `ResetSessionMetrics` 不再碰这三个字段，另设 `ResetResponseCheckMetrics()` |
+| C `overall_score` 没进 CSV | **已解决** | 新增列；中断回合留空而不是 0 |
+| D 中途退出 / 离场不写行 | **已解决** | `FlushUnfinishedSession()` + 新增 `completed` 列 |
+| E 实验当天看不到 ID / 条件 | **已解决** | `Assets/Scripts/Research/ResearchHudLabel.cs`，视野左上角常驻 |
+
+**A 的细节**：`TrainingDataLogger` 的 GUID 在全项目所有 `.unity` / `.prefab` 里零命中，
+类上也没有自启动入口。结果面板照常显示成绩，所以在设备上看不出任何异常。
+现在和 `AEDTrainingRuntime` 用同一套自举方式（`sceneLoaded` 里重试，因为启动场景是
+没有训练控制器的 `Scenes/MainMenu.unity`）。
+
+**B 的细节**：`WaitForResponseCheck()` 在按压阶段**之前**跑完并写入
+`_responseCheckSeconds` 等三个字段，但随后的 `StartCPRPhase()` → `ResetSessionMetrics()`
+把它们归零。三条路径（Story / AED / 纯 CPR）全部中招，
+CSV 的 `response_check_s` / `response_voice_heard` / `response_skipped` 恒为 `0.00 / 0 / 0`，
+结果面板那一行也永远显示 0.0 秒。
+
+**D 的细节**：中断本身就是所见（嫌疼停下、手部追踪失灵），
+丢掉的话分析侧只会看到「这名被试没有体验过」。现在中断回合也留一行，`completed=0`，
+`overall_score` 留空。入口有三个：中途退出按钮（`AbortCurrentTraining`）、
+重新开始（`RestartTrainingInternal`）、应用退出（`OnApplicationQuit`，`ExitToMainMenu` 也走这里）。
+`trainingStartTime` 兼作哨兵，不会重复写。
+
+未做：VR 内的 ID 输入面板（仍靠 `session_config.json`）。
 
 ---
 
@@ -147,6 +176,7 @@
 | `condition` | 会话开始时选择 | `A`（画面のみ）/ `B`（画面＋振动） |
 | `trial_index` | 会话开始时选择 | 被験者間なので通常 1。再実施したときだけ 2 以上 |
 | `app_version` | `Application.version` | 中途改过参数时能追溯 |
+| `completed` | `SessionCompletedNormally` | `1` 规定次数走完，`0` 中途退出。分析前先按这一列筛 |
 | `guideline_depth_min` / `guideline_depth_max` | `minGoodDepthCm` / `maxGoodDepthCm` | 判定阈值一起存，后期才能复现 |
 | `guideline_rate_min` / `guideline_rate_max` | `minGoodRateBPM` / `maxGoodRateBPM` | 同上 |
 | `interruption_threshold_s` | `InterruptionThresholdSec` | 同上（缺口 5） |
@@ -169,7 +199,7 @@
 | `aed_total_s` | `ResultDurationSeconds` | |
 | `aed_time_to_pads_s` / `aed_time_to_shock_s` | **要新增**（缺口 4） | |
 | `quiz_correct` / `quiz_total` / `quiz_wrong_topics` | `QuizResult` | |
-| `overall_score` | 既有加权总分 | 自家算法，**不要当主要终点**，当描述统计用 |
+| `overall_score` | `LastOverallScore` | 自家算法，**不要当主要终点**，当描述统计用。中断回合为空 |
 | `session_duration_s` | 既有 | |
 
 ### 表 2 `compressions.csv` — 每次按压一行（学习曲线・变异度分析用）
@@ -193,7 +223,10 @@
 
 ### 5.1 一个新组件 `TrainingDataLogger`
 
-挂在和 `CPRTrainingController` 同一个物体上，职责只有三件：
+**不需要挂在场景里**（最初的方案是挂在 `CPRTrainingController` 同一个物体上，
+但那样漏挂一次就整场数据为零，而且当场看不出来）。改成 `RuntimeInitializeOnLoadMethod`
+自启动：场景加载后若存在 `CPRTrainingController` 而没有记录器，就自己建一个。
+职责只有三件：
 
 1. 订阅 `OnCompressionComplete` / `OnRecoilEvaluated` / `OnPositionEvaluated`，把逐次明细攒在 `List` 里
 2. 训练结束时，从 controller 读汇总字段，拼成 `sessions.csv` 一行
@@ -211,7 +244,13 @@ VR 里打字非常痛苦。按省事程度排序：
 3. **`PlayerPrefs` + adb 传参** —— 最省事但最容易忘记改。
 
 推荐 1。实验当天最怕的就是「这场的 ID 忘了改，两个人的数据写到同一个编号下」。
-面板设好后把当前 ID / 条件 / 轮次**常驻显示在 HUD 角落**，实验者随时能看见有没有设错。
+
+常驻显示这一半已经做了：`Assets/Scripts/Research/ResearchHudLabel.cs`，同样是自启动，
+在视野左上角贴一块小牌子，内容是 `REC/IDLE  P07 / B / 2` —— 当前 ID / 群 / 轮次，
+以及此刻是否正在记录（记录中变绿）。开场前扫一眼就能对着分配表核对。
+纯 ASCII，不依赖 CJK 字体图集；`raycastTarget` 全关，不会抢手部的 poke 判定。
+
+输入面板（第 1 项）仍未做，目前靠 `session_config.json`。
 
 ### 5.3 导出
 

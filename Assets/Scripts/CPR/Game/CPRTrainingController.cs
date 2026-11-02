@@ -231,6 +231,17 @@ namespace CPRSimulation.Game
         public float ChestCompressionFraction => CalculateChestCompressionFraction(Time.time);
         public bool AedFlowIncludedInResult => RequiresAedFlowForResult();
 
+        /// <summary>
+        /// 結果画面に出している加重総合点。自家製の式なので主要評価項目には使えないが、
+        /// 記述統計として残しておかないと「画面にはこう出ていた」が後から再現できない。
+        /// 中断で終わった回は計算されないので <see cref="HasOverallScore"/> で判別する。
+        /// </summary>
+        public float LastOverallScore => _lastOverallScore;
+        public bool HasOverallScore => _hasOverallScore;
+
+        /// <summary>規定回数まで到達して完了したか。中断・途中離脱なら false。</summary>
+        public bool SessionCompletedNormally => _sessionCompletedNormally;
+
         public static void SetRequestedTrainingMode(TrainingMode mode)
         {
             if (mode == TrainingMode.None)
@@ -266,6 +277,11 @@ namespace CPRSimulation.Game
         private int _tooFastSamples;
         private int _currentQualityStreak;
         private int _bestQualityStreak;
+
+        // 結果の組み立て時にしか存在しなかった値。研究用に残しておく。
+        private float _lastOverallScore;
+        private bool _hasOverallScore;
+        private bool _sessionCompletedNormally;
 
         // ── 指南要求但之前完全没统计的三项 ──
         // 回弹：检测器早就测出来了（LastRecoilIncomplete），但一分都不占，
@@ -2713,7 +2729,10 @@ namespace CPRSimulation.Game
 
             StopAllCoroutines();
 
+            FlushUnfinishedSession();
+
             ResetSessionMetrics();
+            ResetResponseCheckMetrics();
             selectedTrainingMode = TrainingMode.None;
             ChangePhase(TrainingPhase.WaitingStart);
 
@@ -3341,9 +3360,16 @@ namespace CPRSimulation.Game
             _longestHandsOffSeconds = 0f;
             _interruptionCount = 0;
 
-            _responseCheckSeconds = 0f;
-            _responseCheckVoiceHeard = false;
-            _responseCheckSkipped = false;
+            // 意识确认の計測値はここで落とさない。
+            // ResetSessionMetrics は StartCPRPhase から呼ばれるが、意识确认は
+            // その前（PatientFallSequence の中）で終わっている。一緒に消すと
+            // 測ったばかりの値が記録される前にゼロへ戻り、結果画面も CSV も
+            // 0.0 秒 / 呼びかけなし で固定されてしまう。
+            // 落とすのは ResetResponseCheckMetrics()（計測の直前と中断時）。
+
+            _hasOverallScore = false;
+            _lastOverallScore = 0f;
+            _sessionCompletedNormally = false;
 
             _awaitingVentilation = false;
             _breathsGivenThisCycle = 0;
@@ -3465,9 +3491,7 @@ namespace CPRSimulation.Game
             }
 
             _responseCheckDone = false;
-            _responseCheckSkipped = false;
-            _responseCheckVoiceHeard = false;
-            _responseCheckSeconds = 0f;
+            ResetResponseCheckMetrics();
 
             SetupResponseCheckDetector();
             BeginResponseVoiceMonitoring();
@@ -3526,6 +3550,18 @@ namespace CPRSimulation.Game
 
             if (_responseCheckPanel != null)
                 _responseCheckPanel.SetActive(false);
+        }
+
+        /// <summary>
+        /// 意识确认の計測値だけを落とす。ResetSessionMetrics とは呼ばれる時機が違う——
+        /// あれは按压阶段の開始時、こちらは意识确认そのものの開始時と中断時。
+        /// 混ぜると測った値が記録前に消える。
+        /// </summary>
+        private void ResetResponseCheckMetrics()
+        {
+            _responseCheckSeconds = 0f;
+            _responseCheckVoiceHeard = false;
+            _responseCheckSkipped = false;
         }
 
         private void OnResponseCheckSkipped()
@@ -4045,7 +4081,10 @@ namespace CPRSimulation.Game
             Debug.Log($"[CPRTraining] 完成 - 按压:{compressionCount}, 用时:{totalTime:F1}s");
 
             // 研究用ログ。ここで投げないと、結果テキストを作った時点の統計が失われる。
+            _sessionCompletedNormally = true;
             OnSessionCompleted?.Invoke(this);
+            // 二重記録の防止。以降に中断・離脱が来ても未完了行を足さない。
+            trainingStartTime = 0f;
         }
 
         /// <summary>
@@ -4085,6 +4124,10 @@ namespace CPRSimulation.Game
                   ccfScore * 0.07f + consistencyScore * 0.06f + countScore * 0.07f + aedScore * 0.25f
                 : depthScore * 0.25f + rateScore * 0.20f + recoilScore * 0.15f + positionScore * 0.15f +
                   ccfScore * 0.10f + consistencyScore * 0.05f + countScore * 0.10f;
+
+            // 画面に出す値と記録に残す値を同じ一箇所から取る。
+            _lastOverallScore = overallScore;
+            _hasOverallScore = true;
 
             float avgRecoilDeficit = _compressionSamples > 0 ? _sumRecoilDeficitCm / _compressionSamples : 0f;
             float avgOffset = _compressionSamples > 0 ? _sumOffsetCm / _compressionSamples : 0f;
@@ -5588,7 +5631,12 @@ namespace CPRSimulation.Game
 
             StopAllCoroutines();
 
+            // 完了済みなら CompleteTraining が trainingStartTime を落としているので何もしない。
+            // 途中でやり直した回だけ未完了行として残る。
+            FlushUnfinishedSession();
+
             ResetSessionMetrics();
+            ResetResponseCheckMetrics();
             selectedTrainingMode = TrainingMode.None;
             _lastCompletedTrainingMode = modeToStart;
 
@@ -5652,6 +5700,36 @@ namespace CPRSimulation.Game
         public void ReturnToStartMenu()
         {
             AbortCurrentTraining();
+        }
+
+        /// <summary>
+        /// 記録中のまま終わった回を 1 行だけ吐かせる。
+        ///
+        /// 完了まで行かなかった回を黙って捨てると、解析側には「この参加者は
+        /// 体験していない」ようにしか見えない。中断そのものが所見（痛がってやめた、
+        /// 手が追えなくなった）なので、completed=0 として残す。
+        ///
+        /// trainingStartTime を見張り番に使う：StartCPRPhase で立ち、
+        /// CompleteTraining と ResetSessionMetrics で落ちる。二重発火しない。
+        /// </summary>
+        private void FlushUnfinishedSession()
+        {
+            if (trainingStartTime <= 0f)
+                return;
+
+            _sessionCompletedNormally = false;
+            OnSessionCompleted?.Invoke(this);
+            trainingStartTime = 0f;
+        }
+
+        /// <summary>
+        /// アプリ終了・エディタの Play 停止。ExitToMainMenu もここを通る。
+        /// OnApplicationQuit は OnDisable / OnDestroy より先に全オブジェクトへ来るので、
+        /// ロガーがまだ購読している間に投げられる。
+        /// </summary>
+        private void OnApplicationQuit()
+        {
+            FlushUnfinishedSession();
         }
 
         private void OnDestroy()

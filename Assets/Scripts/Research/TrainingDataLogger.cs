@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using CPRSimulation.Game;
 using CPRSimulation.Knowledge;
 using VRFirstAid.Equipment;
@@ -64,6 +65,48 @@ namespace CPRSimulation.Research
 
         public string SessionsPath { get { return Path.Combine(Folder, sessionsFileName); } }
         public string CompressionsPath { get { return Path.Combine(Folder, compressionsFileName); } }
+
+        private const string RuntimeRootName = "ResearchDataLogger";
+
+        /// <summary>
+        /// 自己起動。シーンに置いて回る運用にしない理由：
+        /// 置き忘れた回はまるごと記録が残らず、しかも実験当日その場では気づけない
+        /// （画面には結果が出るので、正常に見える）。実験のたびに人間の手順へ
+        /// 依存させる部分を減らす。
+        ///
+        /// RuntimeInitializeOnLoadMethod は「最初のシーンが読み込まれた後」に
+        /// 一度しか走らず、起動シーンは Scenes/MainMenu.unity で訓練コントローラが
+        /// いない。だから AEDTrainingRuntime と同じく sceneLoaded でも拾い直す。
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void Bootstrap()
+        {
+            // 先に外してから付ける：静的イベントの購読はシーンをまたいで生き残り、
+            // エディタで Domain Reload を切っていると Play セッションもまたぐ。
+            SceneManager.sceneLoaded -= HandleSceneLoadedForBootstrap;
+            SceneManager.sceneLoaded += HandleSceneLoadedForBootstrap;
+
+            TryCreateHost();
+        }
+
+        private static void HandleSceneLoadedForBootstrap(Scene scene, LoadSceneMode mode)
+        {
+            TryCreateHost();
+        }
+
+        private static void TryCreateHost()
+        {
+            if (FindObjectOfType<TrainingDataLogger>() != null)
+                return;
+
+            // 訓練コントローラのいないシーン（主菜单）では何も採れないので黙って見送る。
+            // 訓練シーンへ入れば sceneLoaded がもう一度来る。
+            if (FindObjectOfType<CPRTrainingController>() == null)
+                return;
+
+            var go = new GameObject(RuntimeRootName);
+            go.AddComponent<TrainingDataLogger>();
+        }
 
         private void Awake()
         {
@@ -144,6 +187,11 @@ namespace CPRSimulation.Research
             if (controller == null)
                 return;
 
+            // 中断・再開始・アプリ終了がそれぞれ同じイベントを投げてくる。
+            // 計測中でなければ書くものが無い＝二重記録の番人でもある。
+            if (!_sessionActive)
+                return;
+
             _sessionActive = false;
             UnbindDetector();
 
@@ -197,6 +245,7 @@ namespace CPRSimulation.Research
                 Num(ResearchSession.TrialIndex),
                 c.SelectedTrainingMode.ToString(),
                 Application.version,
+                Bool(c.SessionCompletedNormally),
 
                 Num(depthMin), Num(depthMax), Num(rateMin), Num(rateMax),
                 Num(c.InterruptionThresholdSeconds),
@@ -243,8 +292,20 @@ namespace CPRSimulation.Research
 
                 "", "", "",   // quiz_correct / quiz_total / quiz_wrong_topics（知識テストは自分の行を持つ）
 
+                // 中断で終わった回は結果テキストを組み立てていないので総合点が無い。
+                // 0 を入れると「0 点だった」と読めてしまうので空欄にする。
+                c.HasOverallScore ? Num(c.LastOverallScore) : "",
                 Num(c.SessionDurationSeconds)
             };
+
+            // 列を足したときに片方だけ直し忘れると、以降ぜんぶの行が 1 列ずれる。
+            // 解析に入るまで誰も気づかないので、その場で鳴らす。
+            if (f.Count != SessionColumnCount)
+            {
+                Debug.LogError(string.Format(
+                    "[Research] 列数が合わない: 値 {0} 列 / ヘッダ {1} 列。sessions.csv がずれる。",
+                    f.Count, SessionColumnCount));
+            }
 
             AppendLine(SessionsPath, SessionHeader, string.Join(",", f.ToArray()));
 
@@ -265,16 +326,18 @@ namespace CPRSimulation.Research
                 var f = new List<string>(new string[SessionColumnCount]);
                 for (int i = 0; i < f.Count; i++) f[i] = "";
 
-                f[0] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
-                f[1] = ResearchSession.ParticipantId;
-                f[2] = ResearchSession.ConditionCode;
-                f[3] = Num(ResearchSession.TrialIndex);
-                f[4] = "Quiz";
-                f[5] = Application.version;
+                f[ColumnIndex("timestamp")] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+                f[ColumnIndex("participant_id")] = ResearchSession.ParticipantId;
+                f[ColumnIndex("condition")] = ResearchSession.ConditionCode;
+                f[ColumnIndex("trial_index")] = Num(ResearchSession.TrialIndex);
+                f[ColumnIndex("mode")] = "Quiz";
+                f[ColumnIndex("app_version")] = Application.version;
+                // 最後まで解いた時にしか飛んでこないイベントなので常に完了。
+                f[ColumnIndex("completed")] = Bool(true);
 
-                f[SessionColumnCount - 4] = Num(result.correct);
-                f[SessionColumnCount - 3] = Num(result.total);
-                f[SessionColumnCount - 2] = Csv(result.wrongTopics != null
+                f[ColumnIndex("quiz_correct")] = Num(result.correct);
+                f[ColumnIndex("quiz_total")] = Num(result.total);
+                f[ColumnIndex("quiz_wrong_topics")] = Csv(result.wrongTopics != null
                     ? string.Join("|", result.wrongTopics.ToArray())
                     : "");
 
@@ -349,7 +412,7 @@ namespace CPRSimulation.Research
         // ── CSV ──
 
         private const string SessionHeader =
-            "timestamp,participant_id,condition,trial_index,mode,app_version," +
+            "timestamp,participant_id,condition,trial_index,mode,app_version,completed," +
             "guideline_depth_min,guideline_depth_max,guideline_rate_min,guideline_rate_max," +
             "interruption_threshold_s," +
             "compression_count,compression_target,compression_samples," +
@@ -363,16 +426,34 @@ namespace CPRSimulation.Research
             "aed_pads_placed,aed_shock_advised,aed_shock_delivered,aed_rhythm," +
             "aed_total_s,aed_time_to_pads_s,aed_time_to_shock_s," +
             "quiz_correct,quiz_total,quiz_wrong_topics," +
-            "session_duration_s";
+            "overall_score,session_duration_s";
 
         private const string CompressionHeader =
             "participant_id,condition,trial_index,seq,t_since_cpr_start_s," +
             "depth_cm,rate_bpm,recoil_deficit_cm,recoil_incomplete," +
             "offset_cm,off_target,depth_ok,rate_ok";
 
+        private static readonly string[] SessionColumns = SessionHeader.Split(',');
+
         private static int SessionColumnCount
         {
-            get { return SessionHeader.Split(',').Length; }
+            get { return SessionColumns.Length; }
+        }
+
+        /// <summary>
+        /// 列名から位置を引く。「末尾から 4 番目」のような相対位置で書いていると、
+        /// 列を 1 本足した瞬間に知識テストの行だけ静かにズレて、
+        /// 気づくのは解析のときになる。
+        /// </summary>
+        private static int ColumnIndex(string name)
+        {
+            for (int i = 0; i < SessionColumns.Length; i++)
+            {
+                if (SessionColumns[i] == name)
+                    return i;
+            }
+
+            throw new ArgumentException("[Research] 列が見つからない: " + name);
         }
 
         /// <summary>
@@ -386,11 +467,61 @@ namespace CPRSimulation.Research
                 Directory.CreateDirectory(dir);
 
             bool isNew = !File.Exists(path) || new FileInfo(path).Length == 0;
+
+            if (!isNew && !HeaderMatches(path, header))
+            {
+                // 列構成が変わった後のファイルに継ぎ足すと、古い行と新しい行が
+                // 同じヘッダの下で 1 列ずれて並ぶ。見た目は CSV のままなので、
+                // 解析を始めるまで誰も気づけない。古いほうを退避して作り直す。
+                isNew = ArchiveMismatchedFile(path);
+            }
+
             using (var w = new StreamWriter(path, true, new UTF8Encoding(isNew)))
             {
                 if (isNew)
                     w.Write(header + "\n");
                 w.Write(line + "\n");
+            }
+        }
+
+        private static bool HeaderMatches(string path, string header)
+        {
+            try
+            {
+                using (var r = new StreamReader(path, Encoding.UTF8, true))
+                {
+                    string first = r.ReadLine();
+                    if (first == null)
+                        return false;
+
+                    // UTF-8 BOM は StreamReader が食べてくれるが、別の経路で
+                    // 書かれたファイルのために一応落としておく。
+                    return first.TrimStart('﻿').Trim() == header;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Research] 既存ヘッダの確認に失敗: " + e.Message);
+                return true;   // 判断できないときは触らない
+            }
+        }
+
+        /// <summary>退避できたら true（＝ヘッダから書き直してよい）。</summary>
+        private static bool ArchiveMismatchedFile(string path)
+        {
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+            string archived = path + ".old-" + stamp;
+
+            try
+            {
+                File.Move(path, archived);
+                Debug.LogWarning("[Research] 列構成が変わったので退避した: " + archived);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[Research] 古い CSV を退避できない（列がずれたまま追記される）: " + e.Message);
+                return false;
             }
         }
 
