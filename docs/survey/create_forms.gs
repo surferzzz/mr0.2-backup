@@ -7,6 +7,8 @@
  *   3. 関数 createSurvey を選んで実行（初回は認可を求められる）
  *   4. 実行ログに出る URL を控える
  *   5. 2026-11-02 に作った古いフォーム 3 本は retireOldForms で止める
+ *   6. 実験者が毎回記入する記録フォームは createExperimenterForm で作る
+ *      （回答は体験後アンケートと同じスプレッドシートの別タブに入る）
  *
  * 設計（questionnaire_visual_vs_haptic.md と対応）
  *   - 被験者間：1 人は A（画面だけ）か B（画面＋手の振動）の一方だけを体験する
@@ -250,6 +252,80 @@ function buildPostForm_(spreadsheetId) {
 
   form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheetId);
   return form;
+}
+
+// ───────────────────────────────── 実験者記録（実験者が毎回記入する）
+
+// 体験後アンケートの回答先と同じスプレッドシート。別タブとして入るので、
+// 参加者ID で被試の回答と突き合わせられる。
+var SURVEY_SHEET_ID = '1vlpQJj3jBcWBIPadSlJbLdicosjm6ghC1tWmoheXZNU';
+
+/**
+ * 実験 1 回ごとに実験者が記入する記録フォームを作る。被試には見せない。
+ *
+ * 学外の人が触る必要はないので、組織内限定（ログイン必須）はあえて外さない。
+ * 学外の実験者が記入するなら、作成後に設定画面で外すこと。
+ */
+function createExperimenterForm() {
+  var form = FormApp.create('【VR-CPR 研究】実験者記録');
+  form.setDescription(
+    '実験 1 回ごとに、実験者が記入する記録です。被試には見せないでください。\n' +
+    '参加者ID は体験後アンケートと同じ番号を使います。'
+  );
+  form.setCollectEmail(false);
+  form.setAllowResponseEdits(false);
+  form.setProgressBar(false);
+  form.setShuffleQuestions(false);
+
+  addItem_(form, 'E1. 参加者ID', 'text', { required: true });
+  addItem_(form, 'E2. 群', 'radio', {
+    required: true, choices: ['A：画面の表示だけ', 'B：画面の表示＋手の振動']
+  });
+  addItem_(form, 'E3. CPR 経験（割付の層）', 'radio', { required: true, choices: ['あり', 'なし'] });
+  form.addDateItem().setTitle('E4. 実施日').setRequired(true);
+  form.addTimeItem().setTitle('E5. 開始時刻');
+  addItem_(form, 'E6. 実験者名', 'text', { required: true });
+
+  // ID や群の設定し忘れは、あとから見分ける方法がない。毎回ここで確認させる。
+  addItem_(form, 'E7. Unity 側の参加者ID と群（session_config.json）は割付表どおりでしたか', 'radio', {
+    required: true, choices: ['はい', 'いいえ（その場で直した）', 'いいえ（直さずに実施した）']
+  });
+
+  addItem_(form, 'E8. 機材の不具合', 'radio', { required: true, choices: ['なし', 'あり'] });
+  // B 群でグローブが止まっていたら、その回は「触覚あり」として扱えない。
+  addItem_(form, 'E9. B 群の場合：グローブの振動は最後まで動いていましたか', 'radio', {
+    required: true, choices: ['はい', 'いいえ（途中で止まった）', 'A 群なので該当なし']
+  });
+  addItem_(form, 'E10. 体験の完了', 'radio', { required: true, choices: ['最後まで完了', '途中で中断'] });
+
+  // 倫理審査上、体験中・直後の不調は有害事象として記録しておく。
+  addItem_(form, 'E11. 体験中・直後の不調（あてはまるものすべて）', 'checkbox', {
+    required: true,
+    choices: ['なし', '気分不良', 'めまい', '吐き気', '頭痛', '目の疲れ', '転倒・物への接触', 'その他']
+  });
+
+  addItem_(form, 'E12. 体験後アンケート', 'radio', { required: true, choices: ['回答済み', '未回答'] });
+  addItem_(form, 'E13. CSV（sessions.csv / compressions.csv）', 'radio', {
+    required: true, choices: ['回収済み', '未回収']
+  });
+
+  addItem_(form, 'E14. 不具合・中断・不調の内容と対応', 'paragraph', {
+    help: 'E8〜E11 で「あり」「いいえ」「中断」「なし以外」を選んだときは必ず書く'
+  });
+  addItem_(form, 'E15. 備考', 'paragraph', {});
+
+  form.setDestination(FormApp.DestinationType.SPREADSHEET, SURVEY_SHEET_ID);
+
+  var out = [
+    '',
+    '===== 実験者記録フォーム =====',
+    '記入用: ' + form.getPublishedUrl(),
+    '編集用: ' + form.getEditUrl(),
+    '回答先: https://docs.google.com/spreadsheets/d/' + SURVEY_SHEET_ID + '/edit （新しいタブ）'
+  ].join('\n');
+
+  Logger.log(out);
+  return out;
 }
 
 // ───────────────────────────────── 古いフォームを止める
