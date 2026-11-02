@@ -26,6 +26,7 @@ namespace CPRSimulation.Research
         private const string KeyParticipant = "Research.ParticipantId";
         private const string KeyCondition = "Research.Condition";
         private const string KeyTrial = "Research.TrialIndex";
+        private const string KeyHideScore = "Research.HideScore";
 
         public static string ParticipantId
         {
@@ -63,6 +64,26 @@ namespace CPRSimulation.Research
             set
             {
                 PlayerPrefs.SetInt(KeyTrial, Mathf.Clamp(value, 1, 9));
+                PlayerPrefs.Save();
+            }
+        }
+
+        /// <summary>
+        /// 体験の最後に、被験者へ成績を見せないようにする。
+        ///
+        /// 見せると、そのすぐあとに答える自己効力感とリアリティの項目が点数に
+        /// 引きずられる。測りたいのは体験そのものの効果であって、
+        /// 「80 点と言われた直後の気分」ではない。
+        ///
+        /// 採点そのものは止めない。計算も CSV への記録もこれまでどおりで、
+        /// 画面に出さないだけ。教材として使うときは false に戻す。
+        /// </summary>
+        public static bool HideScoreFromParticipant
+        {
+            get { return PlayerPrefs.GetInt(KeyHideScore, 1) != 0; }
+            set
+            {
+                PlayerPrefs.SetInt(KeyHideScore, value ? 1 : 0);
                 PlayerPrefs.Save();
             }
         }
@@ -105,6 +126,13 @@ namespace CPRSimulation.Research
                         : FeedbackCondition.VisualOnly;
                 if (cfg.trialIndex > 0)
                     TrialIndex = cfg.trialIndex;
+                // 文字列にしてあるのは「キーが無い」と「0 が書いてある」を
+                // 区別するため。数値だと既定値の 0 と見分けがつかない。
+                if (!string.IsNullOrEmpty(cfg.hideScore))
+                {
+                    string v = cfg.hideScore.Trim().ToLowerInvariant();
+                    HideScoreFromParticipant = v != "0" && v != "false";
+                }
 
                 return true;
             }
@@ -121,6 +149,7 @@ namespace CPRSimulation.Research
             public string participantId;
             public string condition;
             public int trialIndex;
+            public string hideScore;
         }
 
         public static void ToggleCondition()

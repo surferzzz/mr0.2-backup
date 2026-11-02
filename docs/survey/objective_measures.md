@@ -45,7 +45,30 @@ CSV 的 `response_check_s` / `response_voice_heard` / `response_skipped` 恒为 
 重新开始（`RestartTrainingInternal`）、应用退出（`OnApplicationQuit`，`ExitToMainMenu` 也走这里）。
 `trainingStartTime` 兼作哨兵，不会重复写。
 
-未做：VR 内的 ID 输入面板（仍靠 `session_config.json`）。
+### 第三轮（2026-11-02）：输入面板与成绩的可见性
+
+| 问题 | 状态 | 实装 |
+|---|---|---|
+| F 实机上改 ID 只能靠 adb | **已解决** | `Assets/Scripts/Research/ResearchSetupPanel.cs`，启动时先出设置画面 |
+| G 被试在填问卷前看到成绩 | **已解决** | `ResearchSession.HideScoreFromParticipant`，结算页换成中性文案 |
+
+**F 的细节**：原先唯一的办法是 `adb push session_config.json`。戴着头显改不了，
+所以「前一个被试的设定原样记了下一场」这件事，实验者没有任何手段挡住。
+现在主菜单之前先出一块设置画面：数字键盘输编号、A/B 选组别、1/2/3 选轮次，
+确认之后才放行菜单（确认前主菜单的 Canvas 整个 `SetActive(false)` —— 只关 `Canvas`
+组件不够，`HandPokeButtonInteractor` 是从「启用的 GameObject」上找 `Button` 的，
+看不见也照样能按到）。初始值显示的是**当前设定**而不是空白，因为要让人在这里
+认出「这还是上一场的编号」。编号为空时 `START` 不可按。
+`session_config.json` 仍然有效，适合批量预设。
+
+**G 的细节**：成绩照常计算、照常写进 `sessions.csv`，只是不显示给被试，
+结算页换成「体験は終了です。ヘッドセットを外して、アンケートにお進みください。」。
+理由是紧接着要填的自我效能感和真实感量表会被分数带着走 —— 想测的是体验本身的效果，
+不是「被告知 80 分之后的心情」。**压迫过程中的实时反馈不动**，那是实验操作本身。
+设置画面上有 `SCORE: HIDE / SHOW` 开关，当教学用时切回 `SHOW`；
+`session_config.json` 里也可以写 `"hideScore": "0"`。默认是隐藏。
+
+未做：知识测验（`KnowledgeQuizView`）结束时仍然显示对错与得分，这次没有动。
 
 ---
 
@@ -245,17 +268,39 @@ VR 里打字非常痛苦。按省事程度排序：
 
 推荐 1。实验当天最怕的就是「这场的 ID 忘了改，两个人的数据写到同一个编号下」。
 
-常驻显示这一半已经做了：`Assets/Scripts/Research/ResearchHudLabel.cs`，同样是自启动，
-在视野左上角贴一块小牌子，内容是 `REC/IDLE  P07 / B / 2` —— 当前 ID / 群 / 轮次，
-以及此刻是否正在记录（记录中变绿）。开场前扫一眼就能对着分配表核对。
-纯 ASCII，不依赖 CJK 字体图集；`raycastTarget` 全关，不会抢手部的 poke 判定。
+**两半都已实装。**
 
-输入面板（第 1 项）仍未做，目前靠 `session_config.json`。
+**输入面板**：`Assets/Scripts/Research/ResearchSetupPanel.cs`。自启动，只在有 `MainMenuUI`
+的场景（即主菜单）出现，训练场景不出。布局：
+
+```
+                RESEARCH SETUP
+      Check against the allocation sheet before each run.
+              ┌───────────────────┐
+              │        P07        │
+              └───────────────────┘
+   [1][2][3]        GROUP  [ A ][ B ]
+   [4][5][6]        TRIAL  [1][2][3]
+   [7][8][9]        SCORE  [HIDE][SHOW]
+   [DEL][0][CLR]
+                  [  START  ]
+```
+
+确认后写进 `ResearchSession`（PlayerPrefs），画面销毁，主菜单恢复。
+纯 ASCII，不依赖 CJK 字体图集。按钮是普通的 `Button`，
+所以 `HandPokeButtonInteractor` 不用改就能戳。
+
+**常驻显示**：`Assets/Scripts/Research/ResearchHudLabel.cs`，同样是自启动，
+在视野左上角贴一块小牌子，内容是 `REC/IDLE  P07 / B / 2` —— 当前 ID / 群 / 轮次，
+以及此刻是否正在记录（记录中变绿）。设置画面确认之后仍然看得见，
+所以开场前还能再核对一次。
+纯 ASCII；`raycastTarget` 全关，不会抢手部的 poke 判定。
 
 ### 5.3 导出
 
-- **adb pull**：`adb pull /sdcard/Android/data/<包名>/files/sessions.csv`
-  （Quest 上 `persistentDataPath` 就是这个路径）。最简单，离线也能干。
+- **adb pull**：`adb pull /sdcard/Android/data/com.cprtraining.quest3/files/research/ ./research`
+  （`persistentDataPath` 是 `/sdcard/Android/data/<包名>/files`，两张 CSV 在它下面的
+  `research/` 子目录里 —— `TrainingDataLogger.folderName` 的默认值）。最简单，离线也能干。
 - **自动上传 Google**：按之前讲的 Apps Script Web 应用方案，把 `sessions.csv` 的一行 POST 上去，
   失败就留在本地待补传。`compressions.csv` 行数多，建议还是 adb pull，不要每次按压都发请求。
 

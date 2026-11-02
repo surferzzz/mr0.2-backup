@@ -58,7 +58,10 @@ namespace CPRSimulation.Research
             if (FindObjectOfType<ResearchHudLabel>() != null)
                 return;
 
-            if (FindObjectOfType<CPRTrainingController>() == null)
+            // 訓練シーンと主菜单の両方に出す。確定したあとも値が見えていないと、
+            // 「設定画面では直したが、始める前にもう一度確かめる」ができない。
+            if (FindObjectOfType<CPRTrainingController>() == null &&
+                FindObjectOfType<MainMenuUI>() == null)
                 return;
 
             var go = new GameObject(RuntimeRootName);

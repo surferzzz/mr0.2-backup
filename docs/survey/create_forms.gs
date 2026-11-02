@@ -287,7 +287,7 @@ function createExperimenterForm() {
   addItem_(form, 'E6. 実験者名', 'text', { required: true });
 
   // ID や群の設定し忘れは、あとから見分ける方法がない。毎回ここで確認させる。
-  addItem_(form, 'E7. Unity 側の参加者ID と群（session_config.json）は割付表どおりでしたか', 'radio', {
+  addItem_(form, 'E7. 開始前の設定画面で、参加者ID と群は割付表どおりでしたか', 'radio', {
     required: true, choices: ['はい', 'いいえ（その場で直した）', 'いいえ（直さずに実施した）']
   });
 

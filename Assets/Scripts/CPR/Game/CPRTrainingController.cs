@@ -5,6 +5,7 @@ using System.Collections;
 using TMPro;
 using CPRSimulation;
 using CPRSimulation.Knowledge;
+using CPRSimulation.Research;
 // AED 的心律枚举定义在这里。AEDTrainingRuntime 反过来也 using 本命名空间，
 // 两者互相引用 —— 同一个程序集内合法，不构成循环依赖。
 using VRFirstAid.Equipment;
@@ -4027,6 +4028,14 @@ namespace CPRSimulation.Game
                 depthEval,
                 rateEval);
 
+            // 被験者に見せるぶん。研究モードでは成績を伏せる。
+            // 採点も CSV への記録もこれまでどおり走っていて、差し替えるのは表示だけ。
+            // 直後に答えてもらう自己効力感とリアリティの項目が、点数に引きずられるのを防ぐ。
+            // 圧迫中のリアルタイムな表示は実験の操作そのものなので、ここでは触らない。
+            string shownResult = ResearchSession.HideScoreFromParticipant
+                ? CPRTextLibrary.ResultHiddenForParticipant
+                : result;
+
             // AED 模式下追加 AED 环节评价
             // 只更新专用的结果 Text，不覆盖标题等其他文字
             Text targetText = _completionTextRuntime;
@@ -4043,13 +4052,13 @@ namespace CPRSimulation.Game
                 }
             }
             if (_completionViewRuntime != null)
-                _completionViewRuntime.SetResult(result);
+                _completionViewRuntime.SetResult(shownResult);
             else if (targetText != null)
-                targetText.text = result;
+                targetText.text = shownResult;
             else if (instructionText != null)
                 // instructionText 现在是 TMP_Text，不能再赋给 Text 类型的 targetText，
                 // 所以把「退回指导文本」这一步单独写出来，行为不变
-                instructionText.text = result;
+                instructionText.text = shownResult;
 
             // 按当前语言刷新完成界面的标题和按钮（与开始界面选的语言一致）
             if (completionPanel != null)

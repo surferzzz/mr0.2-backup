@@ -106,6 +106,16 @@ public static class CPRTextLibrary
     public static string ResultTitle =>
         LanguageManager.Get("训练结果", "トレーニング結果", "Training Results");
 
+    /// <summary>
+    /// 研究モードで被験者に見せる結果欄。成績の数字はいっさい出さない。
+    /// 採点も CSV への記録も通常どおり行われていて、表示だけを差し替えている。
+    /// </summary>
+    public static string ResultHiddenForParticipant =>
+        LanguageManager.Get(
+            "体验结束。\n请摘下头显，然后填写问卷。",
+            "体験は終了です。\nヘッドセットを外して、アンケートにお進みください。",
+            "Session complete.\nPlease remove the headset and continue to the questionnaire.");
+
     public static string LabelCount =>
         LanguageManager.Get("总按压次数", "総圧迫回数", "Total Compressions");
 
