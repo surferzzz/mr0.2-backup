@@ -41,11 +41,18 @@ Backups/
 bug/
 surfer-blog/
 
-# Large binaries that must not enter git history (see Git LFS if they need versioning)
+# Source archives: their extracted form lives under Assets/ThirdParty/, so the zips
+# would only duplicate it in history.
 Assets/*.zip
 Assets/*.zip.meta
-Assets/ThirdParty/
-Assets/ThirdParty.meta
+
+# ThirdParty is tracked -- the scenes reference its FBX, materials and textures.
+# These two are the heavy parts Unity never imports: UE5-format source textures
+# (422 MB) and the Blender source the FBX were exported from.
+Assets/ThirdParty/MadduckHospital/Hospital_assets/UE5_textures/
+Assets/ThirdParty/MadduckHospital/Hospital_assets/UE5_textures.meta
+Assets/ThirdParty/MadduckHospital/Hospital_assets/hospital.blend
+Assets/ThirdParty/MadduckHospital/Hospital_assets/hospital.blend.meta
 
 # Build output
 cpr_v0.7/

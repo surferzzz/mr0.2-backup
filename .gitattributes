@@ -1,0 +1,35 @@
+# Unity YAML: text, but never auto-merge -- a merged scene or prefab is corrupt.
+*.unity    -merge
+*.prefab   -merge
+*.asset    -merge
+*.mat      -merge
+*.anim     -merge
+*.controller -merge
+*.physicMaterial -merge
+
+# Binary assets: keep Git from ever applying line-ending conversion to them.
+*.fbx      binary
+*.blend    binary
+*.glb      binary
+*.gltf     binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.tga      binary
+*.psd      binary
+*.tif      binary
+*.exr      binary
+*.hdr      binary
+*.ttf      binary
+*.otf      binary
+*.wav      binary
+*.mp3      binary
+*.ogg      binary
+*.aif      binary
+*.dll      binary
+*.so       binary
+*.aar      binary
+*.dylib    binary
+*.bundle   binary
+*.a        binary
+*.unitypackage binary
