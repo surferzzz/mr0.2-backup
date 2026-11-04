@@ -1,5 +1,6 @@
 using UnityEngine;
 using Bhaptics.SDK2;
+using CPRSimulation.Research;
 
 namespace CPRSimulation
 {
@@ -59,6 +60,28 @@ namespace CPRSimulation
         private float _lastRhythmTime;
         private const float GOOD_RHYTHM_INTERVAL = 0.545f; // 110 BPM 的间隔
         private bool _isBound = false;
+        private int _pulsesThisSession;
+        private bool _loggedSuppression;
+
+        /// <summary>
+        /// 触覚を出してよいか。これが本研究の独立変数そのもの ――
+        /// A 群（視覚のみ）では手袋を一度も鳴らさない。
+        ///
+        /// 群は <see cref="ResearchSession"/> から直接読む。どこかで誰かが
+        /// 「有効にする」のを忘れたら A と B が同じものになってしまうので、
+        /// 外から設定してもらう作りにはしない。
+        /// </summary>
+        public static bool HapticsAllowed
+        {
+            get { return ResearchSession.Condition == FeedbackCondition.VisualHaptic; }
+        }
+
+        /// <summary>
+        /// この回で実際に手袋へ出した回数。B 群なのに 0 なら、
+        /// 手袋がつながっていないか電池が切れている ―― その回は「触覚あり」ではない。
+        /// CSV に入れて、あとから条件が本当に成立していたか確かめられるようにする。
+        /// </summary>
+        public int PulsesThisSession { get { return _pulsesThisSession; } }
 
         private void Start()
         {
@@ -127,6 +150,13 @@ namespace CPRSimulation
         /// </summary>
         public void TriggerShockFeedback(int intensity = 100, int durationMs = 120)
         {
+            // A 群は「画面の表示だけ」。AED の放電でも手袋は鳴らさない。
+            if (!HapticsAllowed)
+            {
+                LogSuppressionOnce();
+                return;
+            }
+
             if (!BhapticsLibrary.IsBhapticsAvailable(false))
             {
                 if (logHapticEvents)
@@ -143,6 +173,7 @@ namespace CPRSimulation
 
             BhapticsLibrary.PlayMotors((int)PositionType.GloveL, shockMotors, durationMs);
             BhapticsLibrary.PlayMotors((int)PositionType.GloveR, shockMotors, durationMs);
+            _pulsesThisSession++;
 
             if (logHapticEvents)
                 Debug.Log("[GloveHaptic] ⚡ AED 电击震动反馈");
@@ -189,6 +220,8 @@ namespace CPRSimulation
         {
             enableRateFeedback = true;
             _lastRhythmTime = 0f;
+            _pulsesThisSession = 0;
+            _loggedSuppression = false;
         }
 
         private void OnDestroy()
@@ -340,19 +373,9 @@ namespace CPRSimulation
         /// </summary>
         private void PlayShallowFeedback()
         {
-            if (useHapticEvents && !string.IsNullOrEmpty(eventShallow))
-            {
-                try
-                {
-                    BhapticsLibrary.Play(eventShallow);
-                    if (logHapticEvents) Debug.Log("[GloveHaptic] 播放事件: " + eventShallow);
-                    return;
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogWarning("[GloveHaptic] Play 事件失败，降级为 PlayMotors: " + e.Message);
-                }
-            }
+            if (TryPlayHapticEvent(eventShallow))
+                return;
+
             SetAllMotors(shallowIntensity);
             _durations[0] = 20;
             PlayBothGloves();
@@ -363,19 +386,9 @@ namespace CPRSimulation
         /// </summary>
         private void PlayGoodFeedback()
         {
-            if (useHapticEvents && !string.IsNullOrEmpty(eventGoodDepth))
-            {
-                try
-                {
-                    BhapticsLibrary.Play(eventGoodDepth);
-                    if (logHapticEvents) Debug.Log("[GloveHaptic] 播放事件: " + eventGoodDepth);
-                    return;
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogWarning("[GloveHaptic] Play 事件失败，降级为 PlayMotors: " + e.Message);
-                }
-            }
+            if (TryPlayHapticEvent(eventGoodDepth))
+                return;
+
             SetAllMotors(goodIntensity);
             _durations[0] = pulseDurationMs;
             PlayBothGloves();
@@ -386,19 +399,9 @@ namespace CPRSimulation
         /// </summary>
         private void PlayDeepWarning()
         {
-            if (useHapticEvents && !string.IsNullOrEmpty(eventTooDeep))
-            {
-                try
-                {
-                    BhapticsLibrary.Play(eventTooDeep);
-                    if (logHapticEvents) Debug.Log("[GloveHaptic] 播放事件: " + eventTooDeep);
-                    return;
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogWarning("[GloveHaptic] Play 事件失败，降级为 PlayMotors: " + e.Message);
-                }
-            }
+            if (TryPlayHapticEvent(eventTooDeep))
+                return;
+
             SetAllMotors(deepIntensity);
             _durations[0] = 50;
             PlayBothGloves();
@@ -428,6 +431,51 @@ namespace CPRSimulation
             PlayBothGloves();
         }
 
+        /// <summary>
+        /// 登録済みイベントで鳴らす。戻り値は「この呼び出しで片がついたか」。
+        ///
+        /// A 群のときは鳴らさずに true を返す。false を返すとモーター直叩きへ
+        /// 降格してしまい、抑えたはずの振動がそこから漏れる。
+        /// </summary>
+        private bool TryPlayHapticEvent(string eventName)
+        {
+            if (!useHapticEvents || string.IsNullOrEmpty(eventName))
+                return false;
+
+            if (!HapticsAllowed)
+            {
+                LogSuppressionOnce();
+                return true;
+            }
+
+            try
+            {
+                BhapticsLibrary.Play(eventName);
+                _pulsesThisSession++;
+                if (logHapticEvents) Debug.Log("[GloveHaptic] 播放事件: " + eventName);
+                return true;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[GloveHaptic] Play 事件失败，降级为 PlayMotors: " + e.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 鳴らさない理由は 1 回だけ出す。毎回出すと圧迫のたびにログが流れて、
+        /// ほかのメッセージが読めなくなる。
+        /// </summary>
+        private void LogSuppressionOnce()
+        {
+            if (_loggedSuppression)
+                return;
+
+            _loggedSuppression = true;
+            Debug.Log("[GloveHaptic] 条件 A（視覚のみ）のため手袋は鳴らさない。"
+                + " 群は設定画面か session_config.json で切り替える。");
+        }
+
         private void SetAllMotors(int intensity)
         {
             intensity = Mathf.Clamp(intensity, 1, 100);
@@ -441,6 +489,13 @@ namespace CPRSimulation
 
         private void PlayBothGloves()
         {
+            // 最後の関所。モーター経路はすべてここを通る。
+            if (!HapticsAllowed)
+            {
+                LogSuppressionOnce();
+                return;
+            }
+
             if (!BhapticsLibrary.IsBhapticsAvailable(false))
             {
                 if (logHapticEvents)
@@ -452,6 +507,7 @@ namespace CPRSimulation
 
             BhapticsLibrary.PlayMotors((int)PositionType.GloveL, _motors, pulseDurationMs);
             BhapticsLibrary.PlayMotors((int)PositionType.GloveR, _motors, pulseDurationMs);
+            _pulsesThisSession++;
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
 using UnityEngine;
+using CPRSimulation.Research;
 #if BHAPTICS_SDK2
 using Bhaptics.SDK2;
 #endif
@@ -181,6 +182,11 @@ namespace CPRSimulation.Core
         /// </summary>
         public void PlayGloveVibration(int intensity, int durationMs)
         {
+            // A 群（視覚のみ）では手袋を鳴らさない。この経路は
+            // GloveHapticController を通らないので、同じ関所をここにも置く。
+            if (!GloveHapticController.HapticsAllowed)
+                return;
+
             if (testModeWithoutDevice)
             {
                 if (showDebugLog)
@@ -256,6 +262,9 @@ namespace CPRSimulation.Core
         /// </summary>
         private void PlayRhythmBeat()
         {
+            if (!GloveHapticController.HapticsAllowed)
+                return;
+
             if (testModeWithoutDevice)
             {
                 if (showDebugLog)

@@ -317,6 +317,8 @@ namespace CPRSimulation.Research
             ResearchSession.Condition = _condition;
             ResearchSession.TrialIndex = _trial;
             ResearchSession.HideScoreFromParticipant = _hideScore;
+            // ここで入力した値が、端末に残った古い JSON に負けないようにする。
+            ResearchSession.MarkConfiguredInThisLaunch();
 
             Debug.Log("[Research] 設定を確定: " + ResearchSession.Describe()
                 + " / score " + (_hideScore ? "hidden" : "shown"));

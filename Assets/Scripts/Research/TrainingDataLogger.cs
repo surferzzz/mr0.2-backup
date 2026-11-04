@@ -242,6 +242,10 @@ namespace CPRSimulation.Research
                 DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture),
                 ResearchSession.ParticipantId,
                 ResearchSession.ConditionCode,
+                // 条件が本当に成立していたか。B 群なのに haptic_pulses が 0 なら、
+                // 手袋が動いていない＝その回は「触覚あり」として扱えない。
+                Bool(GloveHapticController.HapticsAllowed),
+                Num(c.hapticController != null ? c.hapticController.PulsesThisSession : 0),
                 Num(ResearchSession.TrialIndex),
                 c.SelectedTrainingMode.ToString(),
                 Application.version,
@@ -412,7 +416,8 @@ namespace CPRSimulation.Research
         // ── CSV ──
 
         private const string SessionHeader =
-            "timestamp,participant_id,condition,trial_index,mode,app_version,completed," +
+            "timestamp,participant_id,condition,haptic_enabled,haptic_pulses," +
+            "trial_index,mode,app_version,completed," +
             "guideline_depth_min,guideline_depth_max,guideline_rate_min,guideline_rate_max," +
             "interruption_threshold_s," +
             "compression_count,compression_target,compression_samples," +

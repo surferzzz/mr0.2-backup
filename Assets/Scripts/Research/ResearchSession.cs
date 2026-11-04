@@ -28,6 +28,12 @@ namespace CPRSimulation.Research
         private const string KeyTrial = "Research.TrialIndex";
         private const string KeyHideScore = "Research.HideScore";
 
+        /// <summary>
+        /// 設定画面で確定したか。PlayerPrefs には入れない ――
+        /// 「この起動で人が目で見て確定したか」だけを指すので、持ち越してはいけない。
+        /// </summary>
+        private static bool _configuredInThisLaunch;
+
         public static string ParticipantId
         {
             get { return PlayerPrefs.GetString(KeyParticipant, "P00"); }
@@ -106,9 +112,19 @@ namespace CPRSimulation.Research
         ///   adb push session_config.json /sdcard/Android/data/&lt;package&gt;/files/research/
         /// 中身："{\"participantId\":\"P07\",\"condition\":\"B\",\"trialIndex\":2}"
         /// ファイルが無ければ何もしない（前回の設定がそのまま残る）。
+        ///
+        /// 設定画面で確定済みのときは読まない。ロガーは訓練シーンで生まれるので、
+        /// 順番としては「画面で確定 → シーン遷移 → ここ」になる。古い JSON が
+        /// 端末に残っていると、いま入力したばかりの値を黙って上書きしてしまう。
         /// </summary>
         public static bool TryLoadFromConfigFile(string path)
         {
+            if (_configuredInThisLaunch)
+            {
+                Debug.Log("[Research] 設定画面で確定済みのため session_config.json は読まない");
+                return false;
+            }
+
             try
             {
                 if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
@@ -150,6 +166,15 @@ namespace CPRSimulation.Research
             public string condition;
             public int trialIndex;
             public string hideScore;
+        }
+
+        /// <summary>
+        /// 設定画面で確定したことを記録する。以降この起動では
+        /// session_config.json に上書きさせない。
+        /// </summary>
+        public static void MarkConfiguredInThisLaunch()
+        {
+            _configuredInThisLaunch = true;
         }
 
         public static void ToggleCondition()

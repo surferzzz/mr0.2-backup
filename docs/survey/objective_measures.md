@@ -70,6 +70,58 @@ CSV 的 `response_check_s` / `response_voice_heard` / `response_skipped` 恒为 
 
 未做：知识测验（`KnowledgeQuizView`）结束时仍然显示对错与得分，这次没有动。
 
+### 第四轮（2026-11-04）：自变量本身没有实装
+
+| 问题 | 状态 | 实装 |
+|---|---|---|
+| H 面板输入的值被旧的 `session_config.json` 覆盖 | **已解决** | `ResearchSession.MarkConfiguredInThisLaunch()` |
+| I **组别 A/B 不驱动任何代码，两组跑的程序一样** | **已解决** | `GloveHapticController.HapticsAllowed`，并新增两列记录实际状态 |
+| J CCF 把最后一次通气停顿算了两次 | **已解决** | `EndVentilation` 里 `_lastCompressionAtTime` 挪到完成判定之前 |
+
+**I 的细节（最要紧的一条）**：`ResearchSession.Condition` 在 Research 命名空间之外
+只被读过一次，而且是用来决定隐不隐藏成绩的。它从来没有被用来开关手套震动。
+`CPRTrainingController` 反过来还会在场景里找不到 `GloveHapticController` 时**自动建一个**。
+也就是说 A 组和 B 组跑的是完全相同的程序，`condition` 列只是一个标签，
+不对应任何实际差异 —— 被试间设计的自变量没有实装。
+
+现在 `GloveHapticController.HapticsAllowed` 直接读 `ResearchSession.Condition`，
+三个出口（`TryPlayHapticEvent` / `PlayBothGloves` / `TriggerShockFeedback`）各有一道关，
+项目里全部 5 处 `BhapticsLibrary.PlayMotors` / `Play` 调用都在关后面。
+故意不做成「由外部传入的开关」：那样只要有一处忘了设，A 和 B 又会变成同一个东西。
+
+还有第二条触觉通路：`Assets/Scripts/CPR/Core/GloveHapticFeedback.cs`。它的 GUID 在场景和
+预制体里零命中，只有 4 个编辑器向导（`OneClickFix` / `AddTrainingSetup` /
+`SimpleXBotSetup` / `XBotSetup`）会 `AddComponent` 它。实验前谁跑一次向导，
+场景里就会多一个不受组别控制的震动源。所以同样的关也加在了它的两个播放入口上。
+
+**连带的行为变化**：`Condition` 的默认值是 A，所以装上新版之后，
+不在设置画面上选 B 就**完全没有手套震动**。当教学用时记得选 B。
+
+**新增两列**，用来事后验证条件是否真的成立：
+
+| 列 | 来源 | 怎么用 |
+|---|---|---|
+| `haptic_enabled` | `GloveHapticController.HapticsAllowed` | 软件这一侧是否放行。应当和 `condition` 完全一致，不一致说明有 bug |
+| `haptic_pulses` | `GloveHapticController.PulsesThisSession` | 这一场实际往手套发了多少次。**B 组为 0 就是手套没在动**，那一场不能当「触觉有」来分析 |
+
+解析前的筛查因此多一条：`condition=B` 且 `haptic_pulses=0` 的行要剔除或单独处理。
+
+**H 的细节**：`TrainingDataLogger.Awake()` 读 `session_config.json`，而记录器要等训练场景
+加载后才诞生，设置面板却在主菜单里就写完了 PlayerPrefs。顺序是
+「面板确认 → 场景切换 → 记录器读 JSON → 覆盖」，设备上只要残留过一个旧 JSON，
+面板就白填了，而且是静默的 —— 恰恰是面板要防的那类事故。
+现在面板确认时打一个**只存在于本次启动**的标记，有标记就不读文件；
+文件退化成「没人手输时的兜底」，批量预设仍然可用。
+
+**J 的细节**：`EndVentilation` 先把通气停顿计进 `_totalHandsOffSeconds`，
+然后在最后一个循环里 `CompleteTraining(); return;` —— 把后面那行
+`_lastCompressionAtTime = Time.time;` 跳过去了。于是
+`CalculateChestCompressionFraction` 算出的 `trailing` 仍然是「最后一次按压到现在」，
+正好又把这段停顿包进去，和已经计入的那份一起被扣两次。
+2 轮 × 30 次、整场约 75 秒的话，CCF 系统性偏低约 7–10 个百分点。
+对两组是同等偏差，不会制造假的组间差异，但报出来的绝对值是错的，
+而指南的 60% 是个绝对阈值。把赋值挪到完成判定之前就好了。
+
 ---
 
 ## 1. 现状：代码里已经在算什么
@@ -197,6 +249,8 @@ CSV 的 `response_check_s` / `response_voice_heard` / `response_skipped` 恒为 
 | `timestamp` | `DateTime.Now` ISO8601 | |
 | `participant_id` | 会话开始时输入 | **和问卷的 P1 用同一个值** |
 | `condition` | 会话开始时选择 | `A`（画面のみ）/ `B`（画面＋振动） |
+| `haptic_enabled` | `GloveHapticController.HapticsAllowed` | 软件侧是否放行震动。应与 `condition` 一致 |
+| `haptic_pulses` | `GloveHapticController.PulsesThisSession` | 实际发往手套的次数。**B 组为 0＝手套没动**，该场不成立 |
 | `trial_index` | 会话开始时选择 | 被験者間なので通常 1。再実施したときだけ 2 以上 |
 | `app_version` | `Application.version` | 中途改过参数时能追溯 |
 | `completed` | `SessionCompletedNormally` | `1` 规定次数走完，`0` 中途退出。分析前先按这一列筛 |

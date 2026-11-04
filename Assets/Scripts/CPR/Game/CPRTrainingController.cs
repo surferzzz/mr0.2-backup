@@ -3761,16 +3761,22 @@ namespace CPRSimulation.Game
 
             Debug.Log($"[CPRTraining] 人工呼吸 {_breathsGivenThisCycle} 次完成，停顿 {pause:F1}s");
 
+            // 下一轮按压的起点。不重置的话，通气这段停顿会在下一次按压时
+            // 被 RecordHandsOffSample 当成「从上一次按压到现在」的空窗二次计入。
+            //
+            // 完成判定より前に置くこと。最後の 1 サイクルは下の return で抜けるので、
+            // ここが後ろにあると更新されないまま CompleteTraining へ入り、
+            // CalculateChestCompressionFraction の trailing がこの停止をもう一度拾う。
+            // 上で _totalHandsOffSeconds に足したぶんと合わせて二重に引かれ、
+            // CCF が停止の長さぶんだけ低く出る。
+            _lastCompressionAtTime = Time.time;
+
             // 完成判定挪到这里：最后一个循环的通气做完才算整套 30:2 走完。
             if (compressionCount >= EffectiveTargetCompressions)
             {
                 CompleteTraining();
                 return;
             }
-
-            // 下一轮按压的起点。不重置的话，通气这段停顿会在下一次按压时
-            // 被 RecordHandsOffSample 当成「从上一次按压到现在」的空窗二次计入。
-            _lastCompressionAtTime = Time.time;
         }
 
         private void RefreshVentilationText()
