@@ -714,6 +714,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   holdTime: 0.6
   progressImage: {fileID: 0}
+  autoCreateProgressImage: 1
+  progressFillMethod: 0
+  requireHoldToActivate: 0
 --- !u!1001 &128677955
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -3149,6 +3152,9 @@ MonoBehaviour:
   _currentRateBPM: 0
   _compressionCount: 0
   _handInContact: 0
+  recoilToleranceCm: 1
+  maxPressDurationSec: 1.5
+  positionToleranceCm: 4
 --- !u!114 &527498679
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4094,6 +4100,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   holdTime: 0.6
   progressImage: {fileID: 0}
+  autoCreateProgressImage: 1
+  progressFillMethod: 0
+  requireHoldToActivate: 0
 --- !u!1 &686322548
 GameObject:
   m_ObjectHideFlags: 0
@@ -4292,7 +4301,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 400004, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: 1.2
       objectReference: {fileID: 0}
     - target: {fileID: 400004, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
       propertyPath: m_LocalPosition.y
@@ -4300,7 +4309,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 400004, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 1
+      value: -2.4
       objectReference: {fileID: 0}
     - target: {fileID: 400004, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
       propertyPath: m_LocalRotation.w
@@ -5330,8 +5339,8 @@ MonoBehaviour:
   exitButton: {fileID: 1834177679}
   exitTrainingButton: {fileID: 863831924}
   hudExitButton: {fileID: 0}
-  phaseText: {fileID: 515600148}
-  instructionText: {fileID: 519442619}
+  phaseText: {fileID: 0}
+  instructionText: {fileID: 0}
   timerText: {fileID: 0}
   completionResultText: {fileID: 0}
   pressDetector: {fileID: 527498678}
@@ -5344,6 +5353,13 @@ MonoBehaviour:
   introDuration: 3
   fallAnimationDelay: 1
   targetCompressions: 30
+  aedRhythmMode: 0
+  aedFixedRhythm: 0
+  aedShockableProbability: 0.65
+  useVentilationCycles: 1
+  compressionsPerCycle: 30
+  breathsPerCycle: 2
+  ventilationCyclesTarget: 2
   mainMenuSceneName: MainMenu
   skipFlipInteraction: 1
   completionPanelFixedPosition: 1
@@ -5354,11 +5370,14 @@ MonoBehaviour:
   teleportTargetPosition: {x: -0.26, y: 0.103, z: 0.9}
   teleportTargetRotation: {x: 15.941, y: 0, z: 0}
   detectionLocalOffset: {x: -0.0218, y: 0.0148, z: 0.0702}
+  showDetectionZone: 0
   detectionZoneScale: {x: 0.2, y: 0.08, z: 0.2}
   detectionTriggerRadius: 0.5
   detectionPalmThreshold: 0.2
   detectionAreaSize: {x: 0.2, y: 0.08, z: 0.2}
   drawDetectionGizmo: 1
+  responseCheckSkipAfterSeconds: 20
+  responseCheckConfirmHold: 1
 --- !u!4 &855558847
 Transform:
   m_ObjectHideFlags: 0
@@ -5694,6 +5713,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   holdTime: 0.6
   progressImage: {fileID: 0}
+  autoCreateProgressImage: 1
+  progressFillMethod: 0
+  requireHoldToActivate: 0
 --- !u!1 &864203789
 GameObject:
   m_ObjectHideFlags: 0
@@ -6592,6 +6614,14 @@ MonoBehaviour:
   rumbleLoop: {fileID: 1024132683}
   hitSfx: {fileID: 0}
   generateProceduralRumble: 1
+  autoBindVisualTargets: 1
+  roomRootName: Madduck_Hospital_Training_Room
+  autoCreateDustFX: 1
+  autoCreateHitSfx: 1
+  playEmergencyAnnouncement: 1
+  announcementKey: earthquake_alert
+  announcementLanguageOverride: 
+  announcementSource: {fileID: 0}
   playOnStart: 0
 --- !u!4 &1024132685
 Transform:
@@ -9152,6 +9182,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   holdTime: 0.6
   progressImage: {fileID: 0}
+  autoCreateProgressImage: 1
+  progressFillMethod: 0
+  requireHoldToActivate: 0
 --- !u!134 &1508746443
 PhysicMaterial:
   m_ObjectHideFlags: 0
@@ -11381,6 +11414,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   holdTime: 0.6
   progressImage: {fileID: 0}
+  autoCreateProgressImage: 1
+  progressFillMethod: 0
+  requireHoldToActivate: 0
 --- !u!4 &1866008978 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 487254, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
@@ -11893,21 +11929,25 @@ PrefabInstance:
       propertyPath: _centerEyeCamera
       value: 
       objectReference: {fileID: 1263041377}
+    - target: {fileID: 3903482226883268838, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
+      propertyPath: m_IsActive
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 4148778239110795873, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
       propertyPath: m_Name
       value: '[BuildingBlock] OVRInteractionComprehensive'
       objectReference: {fileID: 0}
     - target: {fileID: 4397664628265918113, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -0.038
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 4397664628265918113, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.174
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 4397664628265918113, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -2.278
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 4397664628265918113, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
       propertyPath: m_LocalRotation.w
@@ -11936,6 +11976,10 @@ PrefabInstance:
     - target: {fileID: 4397664628265918113, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5801245061754409418, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
+      propertyPath: m_Enabled
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 5801245061754409418, guid: 0a7d2469f24041c4284c66706f84c45e, type: 3}
       propertyPath: _playerEyes
