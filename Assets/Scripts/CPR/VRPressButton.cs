@@ -43,23 +43,81 @@ namespace CPRSimulation
         public bool requireHoldToActivate = false;
 
         private Button _button;
+        private Image _hostImage;
+        private bool _ownsProgressImage;
         private bool _isPressing;
         private bool _holdSatisfied;
         private bool _restoreInteractable;
         private float _pressTimer;
 
+        /// <summary>
+        /// ボタン側に sprite が無いときに使う白スプライト。
+        /// Image は sprite が null だと type / fillAmount を無視して矩形を丸ごと描くので、
+        /// これが無いと Filled にしても「進捗 0」のまま白い膜が常に乗ってしまう。
+        /// </summary>
+        private static Sprite s_fallbackSprite;
+
+        private static Sprite FallbackSprite
+        {
+            get
+            {
+                if (s_fallbackSprite == null)
+                {
+                    Texture2D tex = Texture2D.whiteTexture;
+                    s_fallbackSprite = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+                    s_fallbackSprite.name = "PressProgressFallback";
+                }
+                return s_fallbackSprite;
+            }
+        }
+
         private void Awake()
         {
             _button = GetComponent<Button>();
+            _hostImage = GetComponent<Image>();
 
             if (progressImage == null && autoCreateProgressImage)
+            {
                 progressImage = CreateProgressOverlay();
+                _ownsProgressImage = true;
+            }
 
             if (progressImage != null)
             {
                 progressImage.type = Image.Type.Filled;
                 progressImage.fillMethod = progressFillMethod;
                 progressImage.fillAmount = 0f;
+                // 押していない間は描かない。シーンに置かれたボタンは Awake の時点で
+                // sprite を持っていないことが多く、そのままだと覆いが全面に出て
+                // ボタンが白っぽく褪せて見えていた（CPR カード・終了ボタンなど）。
+                progressImage.enabled = false;
+            }
+        }
+
+        private void OnDisable()
+        {
+            // 押している途中で非表示になったときに、覆いが残ったまま戻ってこないように
+            ResetPress();
+        }
+
+        /// <summary>
+        /// 押し始めにボタンの今の sprite に合わせ直す。
+        /// VRTrainingUIStyle.ApplyButton が Awake の後で sprite を差し替えるため、
+        /// Awake 時点の sprite をそのまま使うと形がずれる / null のままになる。
+        /// </summary>
+        private void SyncProgressSprite()
+        {
+            if (progressImage == null)
+                return;
+
+            if (_ownsProgressImage)
+            {
+                Sprite hostSprite = _hostImage != null ? _hostImage.sprite : null;
+                progressImage.sprite = hostSprite != null ? hostSprite : FallbackSprite;
+            }
+            else if (progressImage.sprite == null)
+            {
+                progressImage.sprite = FallbackSprite;
             }
         }
 
@@ -125,7 +183,11 @@ namespace CPRSimulation
             _pressTimer = 0f;
             _holdSatisfied = false;
             if (progressImage != null)
+            {
+                SyncProgressSprite();
                 progressImage.fillAmount = 0f;
+                progressImage.enabled = true;
+            }
         }
 
         public void OnPointerUp(PointerEventData eventData)
@@ -164,7 +226,10 @@ namespace CPRSimulation
             _isPressing = false;
             _pressTimer = 0f;
             if (progressImage != null)
+            {
                 progressImage.fillAmount = 0f;
+                progressImage.enabled = false;
+            }
         }
     }
 }

@@ -329,6 +329,12 @@ namespace CPRSimulation.Research
 
         private void OnDestroy()
         {
+            // Canvas は頭に追従させるためにカメラの子として作っているので、
+            // 自分の GameObject を消しても一緒には消えない。残すと START 後も
+            // 設定画面が主菜单の手前（sortingOrder 100）に貼り付いたままになる。
+            if (_canvas != null)
+                Destroy(_canvas.gameObject);
+
             // 確定せずに消えた場合でも菜单を出し直す。触れない画面だけが残るのが最悪。
             RestoreMainMenu();
         }

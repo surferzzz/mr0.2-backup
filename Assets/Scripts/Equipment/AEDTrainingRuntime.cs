@@ -1867,9 +1867,35 @@ namespace VRFirstAid.Equipment
 
             AddRigAnchorInteractionPoints(points);
             AddNamedHandTransformInteractionPoints(points);
-            AddCameraFallbackInteractionPoints(points);
+
+            // 視線上の点は「手も手柄も取れていないとき」だけの代用品にする。
+            // 常に足していた頃は、判定半径 0.58 m のせいで AED を見ただけで電極パッドの袋が開き、
+            // パッドも視線についてきてしまい、「袋に触れる」「パッドを運ぶ」手順が成立しなかった。
+            if (!IsAnyHandOrControllerTracked())
+            {
+                AddCameraFallbackInteractionPoints(points);
+            }
 
             return points;
+        }
+
+        /// <summary>
+        /// 手か手柄の位置がいま実際にトラッキングされているか。
+        /// HandAnchor / ControllerAnchor の Transform は未トラッキングでも常に存在するので、
+        /// 交互点の数ではなくトラッキング状態そのものを見る。
+        /// </summary>
+        private static bool IsAnyHandOrControllerTracked()
+        {
+            foreach (var hand in FindObjectsOfType<OVRHand>())
+            {
+                if (hand != null && hand.isActiveAndEnabled && hand.IsTracked)
+                {
+                    return true;
+                }
+            }
+
+            return OVRInput.GetControllerPositionTracked(OVRInput.Controller.LTouch) ||
+                   OVRInput.GetControllerPositionTracked(OVRInput.Controller.RTouch);
         }
 
         private bool TryGetVRCursorPosition(out Vector3 position)

@@ -211,17 +211,21 @@ namespace CPRSimulation.Game
                 42
             );
 
+            // 「シナリオ救急」カードは出さない（4 択は多すぎるので CPR / AED / 知識テストの 3 択）。
+            // シーン側に置いてあった場合だけ拾って隠す。
             if (storyModeButton == null)
-                storyModeButton = FindMenuButton("StoryModeButton") ?? CreateRuntimeModeCard("StoryModeButton", panel, new Vector2(-225f, 95f), CPRTrainingController.TrainingMode.Story);
+                storyModeButton = FindMenuButton("StoryModeButton");
+            if (storyModeButton != null)
+                storyModeButton.gameObject.SetActive(false);
 
             if (cprModeButton == null)
-                cprModeButton = FindMenuButton("CPRModeButton") ?? CreateRuntimeModeCard("CPRModeButton", panel, new Vector2(225f, 95f), CPRTrainingController.TrainingMode.CPR);
+                cprModeButton = FindMenuButton("CPRModeButton") ?? CreateRuntimeModeCard("CPRModeButton", panel, new Vector2(-225f, 95f), CPRTrainingController.TrainingMode.CPR);
 
             if (aedModeButton == null)
-                aedModeButton = FindMenuButton("AEDModeButton") ?? CreateRuntimeModeCard("AEDModeButton", panel, new Vector2(-225f, -35f), CPRTrainingController.TrainingMode.AED);
+                aedModeButton = FindMenuButton("AEDModeButton") ?? CreateRuntimeModeCard("AEDModeButton", panel, new Vector2(225f, 95f), CPRTrainingController.TrainingMode.AED);
 
             if (quizModeButton == null)
-                quizModeButton = FindMenuButton("QuizModeButton") ?? CreateRuntimeModeCard("QuizModeButton", panel, new Vector2(225f, -35f), CPRTrainingController.TrainingMode.Quiz);
+                quizModeButton = FindMenuButton("QuizModeButton") ?? CreateRuntimeModeCard("QuizModeButton", panel, new Vector2(0f, -35f), CPRTrainingController.TrainingMode.Quiz);
 
             if (backFromTrainingModeButton == null)
                 backFromTrainingModeButton = FindMenuButton("BackFromTrainingModeButton") ?? CreateRuntimeMenuButton("BackFromTrainingModeButton", panel, new Vector2(-160f, -205f), new Color(0.18f, 0.22f, 0.26f, 0.95f), new Vector2(260f, 72f));

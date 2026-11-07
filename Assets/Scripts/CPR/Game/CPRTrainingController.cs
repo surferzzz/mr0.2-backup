@@ -158,6 +158,13 @@ namespace CPRSimulation.Game
         [Tooltip("勾选后在 Scene 视图绘制检测范围 Gizmo（需选中本物体）")]
         public bool drawDetectionGizmo = true;
 
+        /// <summary>
+        /// 開始画面に「シナリオ救急」カードを出すか。
+        /// 4 択だと多すぎるので外した（CPR / AED / 知識テストの 3 択）。
+        /// モードとその流れ自体は残してあるので、戻すならここを true にするだけ。
+        /// </summary>
+        private static readonly bool StoryModeInStartMenu = false;
+
         public enum TrainingMode
         {
             None,
@@ -668,7 +675,8 @@ namespace CPRSimulation.Game
             var openRt = _controlsGuideOpenButton.GetComponent<RectTransform>();
             openRt.anchorMin = openRt.anchorMax = new Vector2(0.5f, 1f);
             openRt.pivot = new Vector2(0.5f, 1f);
-            openRt.anchoredPosition = new Vector2(0f, -140f);
+            // 「患者の位置を調整」と同じ段に左右で並べる（縦に積むとタイトル文字に重なっていた）
+            openRt.anchoredPosition = new Vector2(-180f, -140f);
 
             RefreshControlsGuideTexts();
         }
@@ -866,7 +874,8 @@ namespace CPRSimulation.Game
 
             _placementPanel.SetActive(false);
 
-            // 入口按钮放在语言按钮和「操作说明」下面一排
+            // 入口ボタンは「操作方法」と同じ段の右側。以前はその下の段（-212）で、
+            // ちょうど歓迎タイトルと知識テストの進捗表示に重なっていた。
             _placementOpenButton = CreateGuideButton(
                 canvas.transform, "PlacementOpenButton",
                 Vector2.zero, new Vector2(340f, 60f),
@@ -875,7 +884,7 @@ namespace CPRSimulation.Game
             var openRt = _placementOpenButton.GetComponent<RectTransform>();
             openRt.anchorMin = openRt.anchorMax = new Vector2(0.5f, 1f);
             openRt.pivot = new Vector2(0.5f, 1f);
-            openRt.anchoredPosition = new Vector2(0f, -212f);
+            openRt.anchoredPosition = new Vector2(150f, -140f);
 
             RefreshPlacementTexts();
         }
@@ -915,6 +924,11 @@ namespace CPRSimulation.Game
         {
             if (_placementPanel != null)
                 _placementPanel.SetActive(false);
+
+            // 選択画面から開いたときだけ選択画面へ戻す。訓練中に戻すと
+            // 開始パネルのカードが HUD の上に重なって出てしまう。
+            if (!IsSelectionScreenPhase)
+                return;
 
             if (introPanel != null) introPanel.SetActive(true);
             if (startTrainingPanel != null) startTrainingPanel.SetActive(true);
@@ -1179,7 +1193,7 @@ namespace CPRSimulation.Game
             EnsureTrainingModeButtonReferences();
 
             if (startScenarioButton != null)
-                startScenarioButton.gameObject.SetActive(true);
+                startScenarioButton.gameObject.SetActive(StoryModeInStartMenu);
 
             if (startCPRButton != null)
                 startCPRButton.gameObject.SetActive(true);
@@ -1281,6 +1295,7 @@ namespace CPRSimulation.Game
             RestoreUIRootToInitial();
             if (startTrainingPanel != null)
                 startTrainingPanel.SetActive(true);
+            SetSelectionChromeVisible(true);
             HideKnowledgeQuizPanel();
             HideStoryCallHelpPanel();
             EnsureTrainingModeButtonsVisible();
@@ -1292,7 +1307,7 @@ namespace CPRSimulation.Game
         private void SetTrainingModeButtonsActive(bool active)
         {
             if (startScenarioButton != null)
-                startScenarioButton.gameObject.SetActive(active);
+                startScenarioButton.gameObject.SetActive(active && StoryModeInStartMenu);
 
             if (startCPRButton != null)
                 startCPRButton.gameObject.SetActive(active);
@@ -2263,12 +2278,29 @@ namespace CPRSimulation.Game
                 }
             }
 
-            LayoutStartMenuButton(startScenarioButton, new Vector2(-290f, 60f), new Vector2(490f, 124f), 26);
-            LayoutStartMenuButton(startCPRButton, new Vector2(290f, 60f), new Vector2(490f, 124f), 26);
-            LayoutStartMenuButton(startAEDButton, new Vector2(-290f, -95f), new Vector2(490f, 124f), 26);
-            LayoutStartMenuButton(quizButton, new Vector2(290f, -95f), new Vector2(490f, 124f), 26);
-            LayoutStartMenuButton(backTrainingButton, new Vector2(-190f, -235f), new Vector2(300f, 76f), 30);
-            LayoutStartMenuButton(exitTrainingButton, new Vector2(190f, -235f), new Vector2(300f, 76f), 30);
+            if (StoryModeInStartMenu)
+            {
+                LayoutStartMenuButton(startScenarioButton, new Vector2(-290f, 60f), new Vector2(490f, 124f), 26);
+                LayoutStartMenuButton(startCPRButton, new Vector2(290f, 60f), new Vector2(490f, 124f), 26);
+                LayoutStartMenuButton(startAEDButton, new Vector2(-290f, -95f), new Vector2(490f, 124f), 26);
+                LayoutStartMenuButton(quizButton, new Vector2(290f, -95f), new Vector2(490f, 124f), 26);
+            }
+            else
+            {
+                // 上段に実技 2 つ（CPR / AED）、下段中央に知識テスト。
+                // LayoutStartMenuButton は SetActive(true) するので、シナリオ救急はその後で隠す。
+                LayoutStartMenuButton(startCPRButton, new Vector2(-290f, 60f), new Vector2(490f, 124f), 26);
+                LayoutStartMenuButton(startAEDButton, new Vector2(290f, 60f), new Vector2(490f, 124f), 26);
+                LayoutStartMenuButton(quizButton, new Vector2(0f, -95f), new Vector2(490f, 124f), 26);
+                if (startScenarioButton != null)
+                    startScenarioButton.gameObject.SetActive(false);
+            }
+            // 知識テストの問題パネルは y = -350〜290 を占めるので、通常位置（-235）だと
+            // 「戻る / 終了」がパネルの下に沈んで無効のように見え、解説文とも重なる。
+            // テスト中だけパネルの外（下）へ出す。
+            float bottomRowY = currentPhase == TrainingPhase.Quiz ? -420f : -235f;
+            LayoutStartMenuButton(backTrainingButton, new Vector2(-190f, bottomRowY), new Vector2(300f, 76f), 30);
+            LayoutStartMenuButton(exitTrainingButton, new Vector2(190f, bottomRowY), new Vector2(300f, 76f), 30);
 
             if (startTrainingPanel != null)
             {
@@ -2576,6 +2608,11 @@ namespace CPRSimulation.Game
                 targetPos = patientPos + offset;
                 targetRot = Quaternion.LookRotation(patientPos - targetPos);
             }
+
+            // リグの根は水平に保つ。ピッチ／ロールを入れると頭の向きと関係なく世界ごと傾いて見え、
+            // VR 酔いの原因になる（固定値 teleportTargetRotation に 15.9° の俯角が入っていた）。
+            // 患者を見下ろすのは本人の頭の動きに任せ、ここでは向き（ヨー）だけ合わせる。
+            targetRot = Quaternion.Euler(0f, targetRot.eulerAngles.y, 0f);
 
             // CharacterController 会覆盖直接设置的 transform.position，需先禁用再设置
             var cc = cameraRig.GetComponent<CharacterController>();
@@ -3228,6 +3265,8 @@ namespace CPRSimulation.Game
         private void BeginTraining(TrainingMode mode)
         {
             selectedTrainingMode = mode;
+            // 倒地〜意識確認のあいだも選択画面の周辺ボタンが残っていたので、ここで畳む
+            SetSelectionChromeVisible(false);
 
             if (mode == TrainingMode.Quiz)
             {
@@ -5219,16 +5258,26 @@ namespace CPRSimulation.Game
                     pressDetector.LastRecoilDeficitCm);
             }
 
-            if (compressionCount < 10)
+            // 区切りは「今のサイクルの何回目か」で判断する。総数で数えていた頃は、
+            // 30:2 を 2 サイクル（計 60 回）回すと 20 回目以降ずっと
+            // 「最終段階…30 回で振り返り」が出続け、2 サイクル目の冒頭でも同じ文言だった。
+            int perCycle = useVentilationCycles
+                ? Mathf.Max(1, compressionsPerCycle)
+                : Mathf.Max(1, EffectiveTargetCompressions);
+            int inCycle = compressionCount % perCycle;
+            int firstPart = Mathf.Max(1, perCycle / 3);
+            bool isLastCycle = compressionCount - inCycle + perCycle >= EffectiveTargetCompressions;
+
+            if (inCycle < firstPart)
             {
-                return LanguageManager.Get(
-                    "\u524d10\u6b21\uff1a\u53cc\u80a9\u5728\u624b\u638c\u6b63\u4e0a\u65b9\uff0c\u5148\u627e\u5230\u7a33\u5b9a\u8282\u594f\u3002",
-                    "\u6700\u521d\u306e10\u56de\uff1a\u80a9\u3092\u624b\u306e\u771f\u4e0a\u306b\u7f6e\u304d\u3001\u30ea\u30ba\u30e0\u3092\u5b89\u5b9a\u3055\u305b\u307e\u3059\u3002",
-                    "First 10: keep shoulders above hands and establish a steady rhythm."
-                );
+                return string.Format(LanguageManager.Get(
+                    "前{0}次：双肩在手掌正上方，先找到稳定节奏。",
+                    "最初の{0}回：肩を手の真上に置き、リズムを安定させます。",
+                    "First {0}: keep shoulders above hands and establish a steady rhythm."
+                ), firstPart);
             }
 
-            if (compressionCount < 20)
+            if (inCycle < perCycle * 2 / 3)
             {
                 return LanguageManager.Get(
                     "\u4e2d\u6bb5\uff1a\u6bcf\u6b21\u6309\u538b\u540e\u8ba9\u80f8\u90e8\u56de\u5f39\uff0c\u4e0d\u8981\u505c\u987f\u3002",
@@ -5237,11 +5286,29 @@ namespace CPRSimulation.Game
                 );
             }
 
-            return LanguageManager.Get(
-                "\u6700\u540e\u9636\u6bb5\uff1a\u4fdd\u6301\u8282\u594f\uff0c\u5b8c\u621030\u6b21\u540e\u67e5\u770b\u590d\u76d8\u3002",
-                "\u6700\u7d42\u6bb5\u968e\uff1a\u30ea\u30ba\u30e0\u3092\u4fdd\u3061\u300130\u56de\u5b8c\u4e86\u5f8c\u306b\u632f\u308a\u8fd4\u308a\u307e\u3059\u3002",
-                "Final set: hold the rhythm and review results after 30 compressions."
-            );
+            if (!useVentilationCycles)
+            {
+                return string.Format(LanguageManager.Get(
+                    "最后阶段：保持节奏，完成{0}次后查看复盘。",
+                    "最終段階：リズムを保ち、{0}回完了後に振り返ります。",
+                    "Final set: hold the rhythm and review results after {0} compressions."
+                ), perCycle);
+            }
+
+            if (!isLastCycle)
+            {
+                return string.Format(LanguageManager.Get(
+                    "本轮最后阶段：保持节奏，满{0}次后做{1}次人工呼吸。",
+                    "このサイクルの最終段階：リズムを保ち、{0}回で人工呼吸を{1}回行います。",
+                    "End of this set: hold the rhythm; after {0} compressions, give {1} breaths."
+                ), perCycle, Mathf.Max(1, breathsPerCycle));
+            }
+
+            return string.Format(LanguageManager.Get(
+                "最后阶段：保持节奏，满{0}次并做{1}次人工呼吸后查看复盘。",
+                "最終段階：リズムを保ち、{0}回と人工呼吸{1}回で振り返ります。",
+                "Final set: hold the rhythm; after {0} compressions and {1} breaths, review your results."
+            ), perCycle, Mathf.Max(1, breathsPerCycle));
         }
 
         private string GetMergedCprDepthFeedback(float depthCm, bool handInContact)
@@ -5580,9 +5647,14 @@ namespace CPRSimulation.Game
             HideAllPanels();
             if (panel != null)
                 panel.SetActive(true);
-            // 完成界面时隐藏语言/说明/放置这一组外围控件（避免遮挡结果和操作按钮）
-            SetSelectionChromeVisible(panel != completionPanel);
+            // 言語 / 操作方法 / 患者の位置調整 は選択画面だけのもの。
+            // 以前は完成画面以外すべてで出していたので、圧迫中の HUD や知識テストの上にも残り、
+            // 圧迫の途中で「患者の位置を調整」を押すと患者が動かせてしまっていた。
+            SetSelectionChromeVisible(IsSelectionScreenPhase);
         }
+
+        private bool IsSelectionScreenPhase =>
+            currentPhase == TrainingPhase.WaitingStart || currentPhase == TrainingPhase.Intro;
 
         private void HideAllPanels()
         {
